@@ -55,6 +55,10 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD)
                  COMMAND ${Python3_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/test_capture_format.py
                          $<TARGET_FILE:hmwire>)
+        # See the note further down: cp1252 stdout on Windows cannot encode this
+        # project's own report glyphs.
+        set_tests_properties(capture_format PROPERTIES ENVIRONMENT
+                             "PYTHONIOENCODING=utf-8")
     else()
         message(STATUS "no python3: the capture-harness format test will not run")
     endif()
@@ -135,6 +139,18 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD AND HM_BUILD_FFI AND Python3_Interpreter_F
                      ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/session1.hmwire)
     set_tests_properties(python_transport_loopback PROPERTIES TIMEOUT 300)
 
+    # ⚠ These harnesses report in the house style — ⚠, ⛔, ≈, § — and Windows
+    # gives CPython a cp1252 stdout, where writing any of them raises
+    # UnicodeEncodeError and fails the test on its OUTPUT rather than its
+    # subject.  Forcing UTF-8 fixes the reporting without thinning the reports,
+    # which is the trade this project makes everywhere else too.
+    # ⚠ The sanitizer block below REPLACES this ENVIRONMENT wholesale rather
+    # than adding to it, so it repeats the variable.  Dropping it there silently
+    # reintroduces this on any Windows sanitizer build.
+    set_tests_properties(python_abi python_replay_parity python_lifetime
+        python_transport_loopback
+        PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8")
+
     # ⚠ ASan lives in the shared object, not in the interpreter, so CPython has
     # to preload the runtime before dlopening it.  `detect_leaks=0` because the
     # interpreter's own arenas are not what this build is looking for.  If the
@@ -155,19 +171,39 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD AND HM_BUILD_FFI AND Python3_Interpreter_F
     #
     # The stale-view half is covered instead by the guard in Samples._alive()
     # (python/hackmotion/session.py), which raises rather than reading.
-    if(HM_ENABLE_ASAN AND NOT MSVC)
+    #
+    # ⚠ THE RUNTIME IS NAMED DIFFERENTLY BY EACH COMPILER, and getting it wrong
+    # is not a skip — it is four failing tests.  gcc ships a shared libasan.so
+    # and finds it with -print-file-name.  clang links its runtime STATICALLY
+    # into executables by default, so nothing resolves the __asan_*/__ubsan_*
+    # symbols in libhackmotion_ffi.so when ctypes dlopen()s it; its shared
+    # runtime lives in -print-runtime-dir under an architecture-specific name.
+    # This is why the sanitizer job passed under gcc here and failed under clang
+    # in CI on the same source.
+    if((HM_ENABLE_ASAN OR HM_ENABLE_UBSAN) AND NOT MSVC)
+        set(HM_SAN_RUNTIME "")
         execute_process(COMMAND ${CMAKE_C_COMPILER} -print-file-name=libasan.so
-                        OUTPUT_VARIABLE HM_ASAN_RUNTIME
+                        OUTPUT_VARIABLE HM_SAN_RUNTIME
                         OUTPUT_STRIP_TRAILING_WHITESPACE
                         ERROR_QUIET)
-        if(EXISTS "${HM_ASAN_RUNTIME}")
+        if(NOT EXISTS "${HM_SAN_RUNTIME}")
+            execute_process(COMMAND ${CMAKE_C_COMPILER} -print-runtime-dir
+                            OUTPUT_VARIABLE HM_SAN_RTDIR
+                            OUTPUT_STRIP_TRAILING_WHITESPACE
+                            ERROR_QUIET)
+            file(GLOB HM_SAN_CANDIDATES "${HM_SAN_RTDIR}/libclang_rt.asan*.so")
+            if(HM_SAN_CANDIDATES)
+                list(GET HM_SAN_CANDIDATES 0 HM_SAN_RUNTIME)
+            endif()
+        endif()
+        if(EXISTS "${HM_SAN_RUNTIME}")
             set_tests_properties(python_abi python_replay_parity python_lifetime
                 python_transport_loopback
                 PROPERTIES ENVIRONMENT
-                "LD_PRELOAD=${HM_ASAN_RUNTIME};ASAN_OPTIONS=detect_leaks=0")
+                "LD_PRELOAD=${HM_SAN_RUNTIME};ASAN_OPTIONS=detect_leaks=0;PYTHONIOENCODING=utf-8")
         else()
             message(STATUS
-                "python binding tests: no libasan.so from ${CMAKE_C_COMPILER}; "
+                "python binding tests: no sanitizer runtime from ${CMAKE_C_COMPILER}; "
                 "they will run without the preload and are expected to fail")
         endif()
     endif()
