@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Mark Liversedge
+build/
+build-*/
+out/
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.gcda
+*.gcno
+*.gcov
+coverage/
+compile_commands.json
+.cache/
+*.swp
+*~
+# ⚠ CAPTURES STAY IGNORED BY DEFAULT, AND THE DEFAULT IS THE SAFE ONE.  A
+# recording carries the sensor's MAC and serial unless the harness redacted
+# them (api-request §2.13), so an ad-hoc capture taken at the repo root must
+# never be committed by accident.  The fixtures below are tracked one by one,
+# after checking each is redacted — see tests/fixtures/README.md.
+*.hmwire
+!tests/fixtures/*.hmwire
+__pycache__/

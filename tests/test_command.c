@@ -1,0 +1,164 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Mark Liversedge */
+/*
+ * test_command.c — the allowlist, which is a safety property rather than a
+ * behaviour.  api-request §2.16: "an API that cannot express the destructive
+ * thing is worth more than a warning".
+ */
+#include "hm_test.h"
+#include "hm_command.h"
+
+/*
+ * ⛔ THE TEST THAT MATTERS.  Spec §4.1: `f0` reboots the device into
+ * firmware-update mode, and it reaches that mode through the ORDINARY data
+ * characteristic — the same pipe every other command uses.  There must be no
+ * path in this library that can emit it.
+ */
+HM_TEST(command_f0_can_never_be_emitted)
+{
+    hm_write_request w;
+    const uint8_t f0[1] = {0xF0};
+
+    HM_ASSERT(!hm_command_is_allowed(0xF0));
+    HM_ASSERT_EQ(hm_command_emit(&w, f0, 1, false), HM_ERR_NOT_ALLOWED);
+}
+
+/*
+ * The device accepts commands this library deliberately does not send (spec
+ * §4.1).  Rather than enumerate them, sweep: EVERY value outside the allowlist
+ * must be refused by the gate, at every length.
+ *
+ * ⚠ This is stronger than a list of the interesting ones, and it cannot rot.
+ * A list has to be maintained against a moving allowlist and silently stops
+ * covering anything the list forgot; the sweep covers all 245 by construction.
+ */
+HM_TEST(command_everything_outside_the_allowlist_is_refused)
+{
+    hm_write_request w;
+    unsigned refused = 0;
+
+    for (unsigned b = 0; b < 256u; ++b) {
+        uint8_t payload[2] = {0, 0};
+        if (hm_command_is_allowed((uint8_t)b)) {
+            continue;
+        }
+        payload[0] = (uint8_t)b;
+        HM_ASSERT_EQ(hm_command_emit(&w, payload, 2, false), HM_ERR_NOT_ALLOWED);
+        ++refused;
+    }
+    /* ⚠ 256 minus the eleven on the list.  Asserted so that an allowlist which
+     * quietly grew cannot leave this test passing over a smaller sweep. */
+    HM_ASSERT_EQ(refused, 245u);
+
+    /* Length is not what the gate keys on: a longer payload whose leading byte
+     * is not a command id is refused just the same. */
+    {
+        const uint8_t wide[4] = {0x10, 0x11, 0x12, 0x13};
+        HM_ASSERT_EQ(hm_command_emit(&w, wide, 4, false), HM_ERR_NOT_ALLOWED);
+    }
+}
+
+/* The allowlist is exactly spec §4's client-facing command set. */
+HM_TEST(command_allowlist_is_exactly_section_4)
+{
+    uint8_t expected[] = {0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0xA0, 0xA1, 0xA2, 0xFA};
+    uint8_t actual[32];
+    size_t n = hm_command_allowlist(actual, sizeof(actual));
+
+    HM_ASSERT_EQ(n, sizeof(expected));
+    for (size_t i = 0; i < n; ++i) {
+        HM_ASSERT_EQ(actual[i], expected[i]);
+    }
+    /* And nothing outside it, swept exhaustively over the byte space. */
+    for (unsigned b = 0; b < 256u; ++b) {
+        bool found = false;
+        for (size_t i = 0; i < sizeof(expected); ++i) {
+            if (expected[i] == (uint8_t)b) {
+                found = true;
+            }
+        }
+        HM_ASSERT_EQ(hm_command_is_allowed((uint8_t)b), found);
+    }
+}
+
+/* §6.1 — `a0 01 7e`. */
+HM_TEST(command_start_stream_encodes_the_observed_default)
+{
+    hm_write_request w;
+    HM_ASSERT_EQ(hm_cmd_start_stream(&w, hm_stream_config_default()), HM_OK);
+    HM_ASSERT_EQ(w.length, 3);
+    HM_ASSERT_EQ(w.data[0], 0xA0);
+    HM_ASSERT_EQ(w.data[1], 0x01);
+    HM_ASSERT_EQ(w.data[2], 0x7E);
+}
+
+/* §4 — the legacy start takes no configuration byte at all. */
+HM_TEST(command_legacy_start_is_a_bare_82)
+{
+    hm_write_request w;
+    HM_ASSERT_EQ(hm_cmd_start_stream(&w, hm_stream_config_legacy()), HM_OK);
+    HM_ASSERT_EQ(w.length, 1);
+    HM_ASSERT_EQ(w.data[0], 0x82);
+}
+
+/* §7.1 — `a1 <first u16be> <last u16be>`, and `first` must be below `last`. */
+HM_TEST(command_history_is_big_endian_and_ordered)
+{
+    hm_write_request w;
+    HM_ASSERT_EQ(hm_cmd_history(&w, 0x1234, 0xABCD), HM_OK);
+    HM_ASSERT_EQ(w.length, 5);
+    HM_ASSERT_EQ(w.data[0], 0xA1);
+    HM_ASSERT_EQ(w.data[1], 0x12);
+    HM_ASSERT_EQ(w.data[2], 0x34);
+    HM_ASSERT_EQ(w.data[3], 0xAB);
+    HM_ASSERT_EQ(w.data[4], 0xCD);
+
+    /* A reversed range is one of the seven distinct causes that all return the
+     * same d0 03; refusing it here removes one thing to guess at later. */
+    HM_ASSERT_EQ(hm_cmd_history(&w, 500, 100), HM_ERR_INVALID_ARG);
+    HM_ASSERT_EQ(hm_cmd_history(&w, 100, 100), HM_ERR_INVALID_ARG);
+}
+
+/* §8.2 — the two pose markers, and nothing else. */
+HM_TEST(command_calibration_markers)
+{
+    hm_write_request w;
+    HM_ASSERT_EQ(hm_cmd_calibration_marker(&w, 0), HM_OK);
+    HM_ASSERT_EQ(w.data[0], 0xA2);
+    HM_ASSERT_EQ(w.data[1], 0x00);
+    HM_ASSERT_EQ(hm_cmd_calibration_marker(&w, 1), HM_OK);
+    HM_ASSERT_EQ(w.data[1], 0x01);
+    HM_ASSERT_EQ(hm_cmd_calibration_marker(&w, 2), HM_ERR_INVALID_ARG);
+}
+
+HM_TEST(command_single_byte_commands)
+{
+    hm_write_request w;
+    HM_ASSERT_EQ(hm_cmd_versions(&w), HM_OK);
+    HM_ASSERT_EQ(w.data[0], 0x80);
+    HM_ASSERT_EQ(w.length, 1);
+    HM_ASSERT_EQ(hm_cmd_status(&w), HM_OK);
+    HM_ASSERT_EQ(w.data[0], 0x81);
+    HM_ASSERT_EQ(hm_cmd_sensor_map(&w), HM_OK);
+    HM_ASSERT_EQ(w.data[0], 0x84);
+    HM_ASSERT_EQ(hm_cmd_mac(&w), HM_OK);
+    HM_ASSERT_EQ(w.data[0], 0x85);
+    HM_ASSERT_EQ(hm_cmd_serial(&w), HM_OK);
+    HM_ASSERT_EQ(w.data[0], 0x86);
+    HM_ASSERT_EQ(hm_cmd_stop_stream(&w), HM_OK);
+    HM_ASSERT_EQ(w.data[0], 0x83);
+    HM_ASSERT_EQ(hm_cmd_power_off(&w), HM_OK);
+    HM_ASSERT_EQ(w.data[0], 0xFA);
+}
+
+HM_TEST(command_emit_rejects_oversized_and_empty_writes)
+{
+    hm_write_request w;
+    uint8_t big[HM_MAX_COMMAND_LEN + 1];
+    memset(big, 0x81, sizeof(big));
+    HM_ASSERT_EQ(hm_command_emit(&w, big, sizeof(big), false), HM_ERR_INVALID_ARG);
+    HM_ASSERT_EQ(hm_command_emit(&w, big, 0, false), HM_ERR_INVALID_ARG);
+    HM_ASSERT_EQ(hm_command_emit(NULL, big, 1, false), HM_ERR_INVALID_ARG);
+}
+
+HM_TEST_MAIN()

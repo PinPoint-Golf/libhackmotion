@@ -1,0 +1,13 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Mark Liversedge */
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: hackmotion
+Description: @PROJECT_DESCRIPTION@
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lhackmotion
+Libs.private: -lm
+Cflags: -I${includedir}

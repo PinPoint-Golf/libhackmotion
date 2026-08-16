@@ -1,0 +1,56 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "vendor": {
+    "spdx": {
+      "SPDX-License-Identifier": "LGPL-2.1-or-later",
+      "copyright": "Copyright (C) 2026 Mark Liversedge",
+      "note": "JSON carries no comment syntax; `vendor` is the presets schema's own escape hatch for data CMake must ignore."
+    }
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Debug, warnings as errors",
+      "binaryDir": "${sourceDir}/build/dev",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "san",
+      "displayName": "Debug + ASan + UBSan",
+      "binaryDir": "${sourceDir}/build/san",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "HM_ENABLE_ASAN": "ON",
+        "HM_ENABLE_UBSAN": "ON"
+      }
+    },
+    {
+      "name": "cov",
+      "displayName": "Debug + gcov",
+      "binaryDir": "${sourceDir}/build/cov",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "HM_ENABLE_COVERAGE": "ON"
+      }
+    },
+    {
+      "name": "rel",
+      "displayName": "Release",
+      "binaryDir": "${sourceDir}/build/rel",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev", "jobs": 4 },
+    { "name": "san", "configurePreset": "san", "jobs": 4 },
+    { "name": "cov", "configurePreset": "cov", "jobs": 4 },
+    { "name": "rel", "configurePreset": "rel", "jobs": 4 }
+  ],
+  "testPresets": [
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
+    { "name": "san", "configurePreset": "san", "output": { "outputOnFailure": true } },
+    { "name": "cov", "configurePreset": "cov", "output": { "outputOnFailure": true } },
+    { "name": "rel", "configurePreset": "rel", "output": { "outputOnFailure": true } }
+  ]
+}

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Mark Liversedge
+---
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+PointerAlignment: Right
+AlignAfterOpenBracket: Align
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterStruct: false
+  AfterEnum: false
+  AfterControlStatement: false
+SortIncludes: false
+IndentCaseLabels: true
+SpaceAfterCStyleCast: false
+AlwaysBreakAfterReturnType: None
