@@ -197,12 +197,24 @@ HM_TEST(device_nonstandard_config_carries_its_justification)
     HM_ASSERT_EQ(copy.bits, 0x5e);
     HM_ASSERT(!hm_stream_config_is_observed_default(copy));
 
-    /* The default carries none, because there is nothing to justify. */
-    HM_ASSERT_STR(hm_stream_config_default().justification, "");
+    /*
+     * ⚠ Bound to a named local before the member is read, and that is required
+     * rather than tidy: the temporary returned by these calls dies at the end of
+     * the full expression, so the pointer HM_ASSERT_STR saves would dangle
+     * before strcmp() ran (clang -Wdangling).  Undefined behaviour that gcc
+     * happens not to diagnose.
+     */
+    {
+        const hm_stream_config def = hm_stream_config_default();
+        const hm_stream_config null_just = hm_stream_config_nonstandard(0x5e, NULL);
+        const hm_stream_config empty_just = hm_stream_config_nonstandard(0x5e, "");
 
-    /* And a caller who supplies nothing gets a recording that says so. */
-    HM_ASSERT_STR(hm_stream_config_nonstandard(0x5e, NULL).justification, "(unjustified)");
-    HM_ASSERT_STR(hm_stream_config_nonstandard(0x5e, "").justification, "(unjustified)");
+        /* The default carries none, because there is nothing to justify. */
+        HM_ASSERT_STR(def.justification, "");
+        /* And a caller who supplies nothing gets a recording that says so. */
+        HM_ASSERT_STR(null_just.justification, "(unjustified)");
+        HM_ASSERT_STR(empty_just.justification, "(unjustified)");
+    }
 
     /* Over-long text is truncated, never overrun. */
     {

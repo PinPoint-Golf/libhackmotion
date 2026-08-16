@@ -59,9 +59,39 @@ static void hm_test_register(const char *name, void (*fn)(void))
     hm_test_count++;
 }
 
+/*
+ * ⚠ AUTO-REGISTRATION IS THE ONE PART OF THIS HARNESS THAT IS NOT PORTABLE C.
+ * A test registers itself by running before main(), so that adding a case needs
+ * no edit to a list somewhere else — a list is exactly the thing that silently
+ * stops covering what it forgot.
+ *
+ * There is no standard way to do that.  GCC and clang have
+ * __attribute__((constructor)); MSVC has no equivalent, so the pointer goes in
+ * the CRT's own pre-main initialiser section (.CRT$XCU) instead, which is the
+ * mechanism the C runtime itself uses.  Both arrive at the same place.
+ *
+ * ⚠ THE FAILURE MODE HERE IS SILENT, WHICH IS WHY HM_TEST_MAIN() COUNTS.  If a
+ * registration mechanism does not fire — a section renamed, a linker discarding
+ * what it thinks is unreferenced — the case simply never runs, and a suite that
+ * ran nothing prints no failures and exits 0.  That reads exactly like a suite
+ * that passed, which is the shape this project has a rule about.  So the runner
+ * refuses to exit 0 having run no cases; the guard is portable even though the
+ * mechanism it guards is not.
+ */
+#if defined(_MSC_VER)
+#pragma section(".CRT$XCU", read)
+#define HM_TEST_CTOR_(name)                                                                  \
+    static void hm_register_##name(void);                                                    \
+    __declspec(allocate(".CRT$XCU")) void (*hm_ctor_##name)(void) = hm_register_##name;      \
+    static void hm_register_##name(void)
+#else
+#define HM_TEST_CTOR_(name)                                                                  \
+    __attribute__((constructor)) static void hm_register_##name(void)
+#endif
+
 #define HM_TEST(name)                                                                        \
     static void name(void);                                                                  \
-    __attribute__((constructor)) static void hm_register_##name(void)                        \
+    HM_TEST_CTOR_(name)                                                                      \
     {                                                                                        \
         hm_test_register(#name, name);                                                       \
     }                                                                                        \
@@ -143,6 +173,14 @@ static void hm_test_register(const char *name, void (*fn)(void))
         }                                                                                    \
         printf("%s: %d test(s), %d assertion(s), %d failure(s)\n", argv[0], ran,             \
                hm_test_assertions, hm_test_failures);                                        \
+        /* ⚠ A suite that registered nothing must not report success — see the                \
+         * note on HM_TEST_CTOR_.  Without this, a broken registration mechanism             \
+         * is indistinguishable from a clean run. */                                         \
+        if (hm_test_count == 0) {                                                            \
+            fprintf(stderr, "hm_test: NO CASES REGISTERED — the registration "               \
+                            "mechanism did not fire; this is a failure, not a pass\n");      \
+            return 2;                                                                        \
+        }                                                                                    \
         return hm_test_failures == 0 ? 0 : 1;                                                \
     }
 

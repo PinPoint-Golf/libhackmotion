@@ -14,6 +14,19 @@
 #include <stdint.h>
 #include <string.h>
 
+/*
+ * ⚠ Every builder below is `static` in a header shared by several test files,
+ * so any given translation unit uses some and not others.  That is unused-
+ * function noise, not a defect — and under -Werror it is fatal on clang.
+ * Marking them keeps the warning switched ON for real cases elsewhere, which
+ * deleting the flag would not.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define HM_WIRE_UNUSED_ __attribute__((unused))
+#else
+#define HM_WIRE_UNUSED_
+#endif
+
 typedef struct hm_wire_block {
     int16_t  q[4];      /* w, x, y, z — world → body */
     int16_t  accel[3];
@@ -21,7 +34,7 @@ typedef struct hm_wire_block {
     uint16_t ticks;
 } hm_wire_block;
 
-static hm_wire_block hm_wire_identity_block(uint16_t ticks)
+static HM_WIRE_UNUSED_ hm_wire_block hm_wire_identity_block(uint16_t ticks)
 {
     hm_wire_block b;
     memset(&b, 0, sizeof(b));
@@ -30,14 +43,14 @@ static hm_wire_block hm_wire_identity_block(uint16_t ticks)
     return b;
 }
 
-static void hm_wire_put_be16(uint8_t *p, uint16_t v)
+static HM_WIRE_UNUSED_ void hm_wire_put_be16(uint8_t *p, uint16_t v)
 {
     p[0] = (uint8_t)(v >> 8);
     p[1] = (uint8_t)(v & 0xffu);
 }
 
 /* Writes one 22-byte block (config with timestamps). */
-static size_t hm_wire_write_block(uint8_t *p, const hm_wire_block *b, int with_ticks)
+static HM_WIRE_UNUSED_ size_t hm_wire_write_block(uint8_t *p, const hm_wire_block *b, int with_ticks)
 {
     size_t o = 0;
     for (int i = 0; i < 4; ++i) {
@@ -60,7 +73,7 @@ static size_t hm_wire_write_block(uint8_t *p, const hm_wire_block *b, int with_t
 }
 
 /* One 46-byte record: u16be header, then lower-arm block, then palm block. */
-static size_t hm_wire_write_record(uint8_t *p, uint16_t index, const hm_wire_block *lower_arm,
+static HM_WIRE_UNUSED_ size_t hm_wire_write_record(uint8_t *p, uint16_t index, const hm_wire_block *lower_arm,
                                    const hm_wire_block *palm, int with_ticks)
 {
     size_t o = 0;
@@ -72,7 +85,7 @@ static size_t hm_wire_write_record(uint8_t *p, uint16_t index, const hm_wire_blo
 }
 
 /* A 0x90 notification carrying one record (47 bytes). */
-static size_t hm_wire_notification1(uint8_t *out, uint16_t index,
+static HM_WIRE_UNUSED_ size_t hm_wire_notification1(uint8_t *out, uint16_t index,
                                     const hm_wire_block *lower_arm, const hm_wire_block *palm)
 {
     out[0] = 0x90;
@@ -80,7 +93,7 @@ static size_t hm_wire_notification1(uint8_t *out, uint16_t index,
 }
 
 /* A 0x90 notification carrying two records (93 bytes). */
-static size_t hm_wire_notification2(uint8_t *out, uint16_t index_a,
+static HM_WIRE_UNUSED_ size_t hm_wire_notification2(uint8_t *out, uint16_t index_a,
                                     const hm_wire_block *arm_a, const hm_wire_block *palm_a,
                                     uint16_t index_b, const hm_wire_block *arm_b,
                                     const hm_wire_block *palm_b)
