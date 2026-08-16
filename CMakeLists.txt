@@ -8,23 +8,67 @@ project(libhackmotion
     LANGUAGES C)
 
 # ---------------------------------------------------------------------------
-# Options
+# Are we the top-level project, or embedded in someone else's build?
+#
+# ⚠ THE CACHE IS NOT DIRECTORY-SCOPED.  Nearly every other CMake variable is —
+# a subdirectory can set CMAKE_C_STANDARD and only its own targets see it — but
+# there is ONE cache per build tree, so a `set(... CACHE ... FORCE)` down here
+# rewrites the *consumer's* settings.  Everything below that could reach outside
+# this directory is gated on this variable.
+#
+# The library is meant to be embedded (api-request §2.0), so the rule is: adding
+# libhackmotion to a project must change NOTHING about that project.  Not its
+# build type, not its test registry, not its install manifest.
+#
+# ⚠ Spelled as a CMAKE_SOURCE_DIR comparison rather than PROJECT_IS_TOP_LEVEL
+# deliberately: that variable is CMake 3.21+ and this project promises 3.16,
+# which is the system CMake on Ubuntu 20.04 LTS.  The comparison is exact and
+# works on every version, so the floor does not have to move for this.
 # ---------------------------------------------------------------------------
-option(HM_BUILD_TESTS      "Build the automated test suite"          ON)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(HM_IS_TOP_LEVEL ON)
+else()
+    set(HM_IS_TOP_LEVEL OFF)
+endif()
+
+# ---------------------------------------------------------------------------
+# Options
+#
+# The four developer-facing ones default to HM_IS_TOP_LEVEL: building this
+# repository directly gets the tests, the tools, the FFI object and -Werror
+# exactly as before, while a consumer that add_subdirectory()s it gets the
+# library and nothing else.  A consumer should not have to read this file to
+# discover it must switch four things off, and would otherwise inherit ~24 test
+# binaries, two CLI tools, a shared object it will never load, and 24 ctest
+# registrations in its own test registry.
+#
+# HM_BUILD_RECORD stays ON either way — it is a library target rather than
+# developer tooling, and an embedder linking the .hmwire container is an
+# ordinary use (PinPoint Studio's offline tools do exactly that).
+# ---------------------------------------------------------------------------
+option(HM_BUILD_TESTS      "Build the automated test suite"          ${HM_IS_TOP_LEVEL})
 option(HM_BUILD_RECORD     "Build the optional wire record/replay module" ON)
-option(HM_BUILD_TOOLS      "Build the command line tools"            ON)
-option(HM_BUILD_FFI        "Build the shared object the Python binding loads" ON)
+option(HM_BUILD_TOOLS      "Build the command line tools"            ${HM_IS_TOP_LEVEL})
+option(HM_BUILD_FFI        "Build the shared object the Python binding loads" ${HM_IS_TOP_LEVEL})
 option(HM_ENABLE_ASAN      "Build with AddressSanitizer"             OFF)
 option(HM_ENABLE_UBSAN     "Build with UndefinedBehaviorSanitizer"   OFF)
 option(HM_ENABLE_COVERAGE  "Build with gcov coverage instrumentation" OFF)
-option(HM_WERROR           "Treat warnings as errors"                ON)
+# ⚠ -Werror is a CI gate, not a property of the code.  Imposing it on a consumer
+# means their build breaks because THEIR compiler version warns where ours does
+# not — a failure they cannot fix and did not cause.
+option(HM_WERROR           "Treat warnings as errors"                ${HM_IS_TOP_LEVEL})
+option(HM_INSTALL          "Generate the install rules"              ${HM_IS_TOP_LEVEL})
 
+# Directory-scoped, so these reach no further than this subtree — unlike the
+# cache write below, they are safe to set unconditionally.
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+# ⚠ Top-level only: this is a cache FORCE, so embedded it would silently rewrite
+# the consumer's build type and hand them an unoptimised everything.
+if(HM_IS_TOP_LEVEL AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
 endif()
 
@@ -274,16 +318,27 @@ endif()
 
 # ---------------------------------------------------------------------------
 # Install
+#
+# ⚠ HM_INSTALL, because an install rule declared here lands in the CONSUMER's
+# install manifest.  Embedded and ungated, `make install` or a CPack run in the
+# consuming project ships libhackmotion.a, this entire header tree and
+# hackmotion.pc into a bundle nobody meant to put them in.
+#
+# add_subdirectory(... EXCLUDE_FROM_ALL) does suppress these — but that is the
+# consumer remembering to pass a flag whose name says nothing about installing,
+# which is not a contract worth resting on.
 # ---------------------------------------------------------------------------
-include(GNUInstallDirs)
-install(TARGETS hackmotion
-        EXPORT hackmotionTargets
-        LIBRARY  DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(DIRECTORY include/hackmotion DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+if(HM_INSTALL)
+    include(GNUInstallDirs)
+    install(TARGETS hackmotion
+            EXPORT hackmotionTargets
+            LIBRARY  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(DIRECTORY include/hackmotion DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tools/hackmotion.pc.in
-               ${CMAKE_CURRENT_BINARY_DIR}/hackmotion.pc @ONLY)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/hackmotion.pc
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tools/hackmotion.pc.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/hackmotion.pc @ONLY)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/hackmotion.pc
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+endif()

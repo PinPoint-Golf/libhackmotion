@@ -26,6 +26,33 @@ ctest --test-dir build/dev --output-on-failure
 
 Presets `dev`, `san`, `cov` and `rel` wrap the usual configurations.
 
+### Embedding
+
+The library is meant to be embedded, so **adding it to your project changes nothing
+about your project** — not its build type, not its test registry, not its install
+manifest. Drop it in and link:
+
+```cmake
+add_subdirectory(libhackmotion)        # or FetchContent_MakeAvailable(hackmotion)
+target_link_libraries(your_app PRIVATE hackmotion)
+```
+
+`#include <hackmotion/hackmotion.h>` then resolves through the link — the include
+directory is `PUBLIC` on the target.
+
+You get the library and nothing else. The tests, the command line tools, the FFI
+shared object, `-Werror` and the install rules all default to ON when this is the
+top-level project and OFF when it is not, so there is no list of options to switch
+off first. Each is still an ordinary option if you want it: `HM_BUILD_TESTS`,
+`HM_BUILD_TOOLS`, `HM_BUILD_FFI`, `HM_WERROR`, `HM_INSTALL`.
+
+`HM_BUILD_RECORD` is the exception and defaults ON either way — `hackmotion_record`
+is a library target rather than developer tooling, and linking the `.hmwire`
+container is an ordinary thing for a consumer to want. It needs the core's internal
+symbols, so it is available in a static build only.
+
+Static or shared is `BUILD_SHARED_LIBS` as usual.
+
 ## Python
 
 The build also produces `libhackmotion_ffi`, which the binding loads. There is
