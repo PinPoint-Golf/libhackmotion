@@ -3013,7 +3013,11 @@ static void history_issue(hm_session *s, hm_request *r)
  */
 static void history_capture_fits(hm_session *s)
 {
-    hm_clock_snapshot snap;
+    /* ⚠ Zero-initialised for MSVC, which cannot see that `have` guarantees the
+     * snapshot is taken before `snap.flags` is read (C4701, fatal under /WX).
+     * The zero value is the SAFE one if the flow ever changes: flags without
+     * HM_CLOCK_HAS_FIT makes the branch below return rather than proceed. */
+    hm_clock_snapshot snap = {0};
     bool              have = false;
 
     for (int i = 0; i < HISTORY_MAX_PENDING; ++i) {

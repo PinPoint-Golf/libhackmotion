@@ -791,11 +791,15 @@ static int cmp_i16(const void *a, const void *b)
     return (x < y) ? -1 : ((x > y) ? 1 : 0);
 }
 
-/* Median of a copy; `values` is not disturbed. */
+/* Median of a copy; `values` is not disturbed.
+ *
+ * ⚠ NAN is a FLOAT constant and every target here is a double, so each use is
+ * cast explicitly.  clang's -Wdouble-promotion rejects the implicit widening
+ * (gcc does not, which is why this only surfaced in CI). */
 static double median_of(const int16_t *values, size_t n, int16_t *scratch)
 {
     if (n == 0u) {
-        return NAN;
+        return (double)NAN;
     }
     memcpy(scratch, values, n * sizeof(int16_t));
     qsort(scratch, n, sizeof(int16_t), cmp_i16);
@@ -810,10 +814,10 @@ static void finish_skew(hm_reconciler *r)
     size_t n = (size_t)r->rep.skew_stored;
     int16_t *scratch;
 
-    r->rep.skew_median_ticks = NAN;
-    r->rep.skew_median_first_half = NAN;
-    r->rep.skew_median_second_half = NAN;
-    r->rep.skew_median_us = NAN;
+    r->rep.skew_median_ticks = (double)NAN;
+    r->rep.skew_median_first_half = (double)NAN;
+    r->rep.skew_median_second_half = (double)NAN;
+    r->rep.skew_median_us = (double)NAN;
     if (n == 0u) {
         return;
     }
