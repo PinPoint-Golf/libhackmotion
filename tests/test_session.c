@@ -310,9 +310,11 @@ static void feed_cal_result(fake *f)
 {
     uint8_t msg[1 + 64];
 
-    /* §8.2: eight Q14 quaternions, ⚠ palm first — the reverse of a record.  The
-     * library carries the payload verbatim into the wire log and decodes none of
-     * it, so eight identities are as informative as the real thing. */
+    /* §8.2's LONG FORM: eight quaternions — the four applied state values, then
+     * the two poses per unit — ⚠ palm first in both halves, the reverse of a
+     * record.  The library carries the payload verbatim into the wire log and
+     * decodes none of it, so eight identities are as informative as the real
+     * thing. */
     memset(msg, 0, sizeof(msg));
     msg[0] = 0x94;
     for (int i = 0; i < 8; ++i) {
@@ -2027,11 +2029,12 @@ HM_TEST(the_calibration_result_reaches_the_wire_log_verbatim_and_the_decoder_nev
         feed_cal_result(f);
 
         /*
-         * ⚠ RECORD THE BYTES, NOT THE DECODE (§5.6).  §12 still lists this
-         * 64-byte payload as undecoded, and §8.2 records TWO encoders for it —
-         * firmware 4.5 populates only the high byte of each component, 4.8 uses
-         * all 16 bits.  A byte-level recording can be re-decoded when that is
-         * settled; a sample-level one has already thrown the bytes away.
+         * ⚠ RECORD THE BYTES, NOT THE DECODE (§5.6).  The library decodes none
+         * of this 64-byte payload — the device applies the transform itself —
+         * and §8.2 records TWO encoders for it: firmware 4.5 populates only the
+         * high byte of each component, 4.8 uses all 16 bits.  A byte-level
+         * recording can be re-decoded by anything that later wants the values;
+         * a sample-level one has already thrown the bytes away.
          */
         for (size_t i = 0; i < f->nwire; ++i) {
             if (f->wire[i].direction != (uint8_t)HM_WIRE_DEVICE_TO_HOST ||
@@ -2041,7 +2044,8 @@ HM_TEST(the_calibration_result_reaches_the_wire_log_verbatim_and_the_decoder_nev
             results++;
             HM_ASSERT_EQ(f->wire[i].length, 65u); /* id + 64 */
             HM_ASSERT_EQ(f->wire[i].flags & (uint8_t)HM_WIRE_REDACTED, 0);
-            /* The first quaternion, w = 16384, intact — §8.2's palm at `a2 00`. */
+            /* The first quaternion, w = 16384, intact — §8.2's q1, the palm
+             * unit's rotation about z. */
             HM_ASSERT_EQ(f->wire[i].data[1], 0x40);
             HM_ASSERT_EQ(f->wire[i].data[2], 0x00);
         }
@@ -2216,6 +2220,64 @@ HM_TEST(a_result_that_never_comes_aborts_and_a_late_one_still_moves_the_flag)
     f->now += 40000;
     feed_frame(f, 600u, ticks_for(600u), 0);
     HM_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)HM_CAL_UNKNOWN);
+    fake_close(f);
+}
+
+/*
+ * ⚠ §8.2's SHORT FORM.  `0x94` has two forms and the device tells them apart by
+ * the notification's total length: 65 bytes of quaternions, or a status byte.
+ * A short one is not a truncated long one, and dropping it as one would leave
+ * the routine to starve on its own result timeout with the device's answer
+ * already on the wire.
+ *
+ * What the status byte MEANS is unknown and no value of it has been captured,
+ * so the library reports it and does not act on it: the routine proceeds and
+ * the presence measurement decides, because that tests what the device is
+ * emitting rather than what a byte claims about it.
+ */
+HM_TEST(the_short_form_of_the_result_is_answered_and_its_status_byte_reported)
+{
+    fake         *f = fake_open(NULL);
+    const uint8_t short_form[2] = { 0x94, 0x2A };
+
+    bring_up(f);
+    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    drain(f);
+    feed_frame(f, 100u, ticks_for(100u), 0);
+    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
+    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    drain(f);
+    feed(f, k_cal_ack, sizeof(k_cal_ack));
+    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_OK);
+    drain(f);
+    feed(f, k_cal_ack, sizeof(k_cal_ack));
+    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_APPLYING);
+
+    feed(f, short_form, sizeof(short_form));
+
+    /* Not a short frame, not an unknown message, and not silently swallowed. */
+    HM_ASSERT_EQ(count_warnings(f, HM_WARN_SHORT_FRAME), 0u);
+    HM_ASSERT_EQ(count_events(f, HM_EV_UNKNOWN_MESSAGE), 0u);
+    HM_ASSERT_EQ(count_warnings(f, HM_WARN_CALIBRATION_STATUS_FORM), 1u);
+    {
+        size_t i;
+        int    seen = 0;
+        for (i = 0; i < f->nevents; ++i) {
+            if (f->events[i].type == (uint16_t)HM_EV_WARNING &&
+                f->events[i].u.warning.code == (uint16_t)HM_WARN_CALIBRATION_STATUS_FORM) {
+                /* The byte itself travels, so a consumer that learns what the
+                 * values mean can read them out of an existing recording. */
+                HM_ASSERT_EQ(f->events[i].u.warning.detail_i32, 0x2A);
+                seen++;
+            }
+        }
+        HM_ASSERT_EQ(seen, 1);
+    }
+
+    /* The routine advances exactly as it does for the long form, and the flag
+     * drops to UNKNOWN rather than claiming either outcome. */
+    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_VERIFYING);
+    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNKNOWN);
     fake_close(f);
 }
 

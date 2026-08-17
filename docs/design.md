@@ -637,8 +637,9 @@ state, expects the gap, does not read it as failure and does not retry into it.
 
 ⚠ **Record the wire bytes, not the decoded samples**. §12 still lists
 undecoded fields — two bytes of the battery reply, the second sensor-map byte,
-the 64-byte calibration payload, two configuration bits — and §6.6's burst
-trigger and §10's unexplained drift are open. When any of those is settled, a
+two configuration bits, the status byte on §8.2's short-form calibration result
+— the 64-byte calibration payload is understood but decoded by nothing here, and
+§6.6's burst trigger and §10's unexplained drift are open. When any of those is settled, a
 byte-level recording can be **re-decoded with the fix applied**; a sample-level
 one cannot, because it has already discarded the bytes the fix would have
 interpreted differently.
@@ -1077,9 +1078,10 @@ cannot be persisted, and one queried after the fact is a different fit.
 Three frames are in play — earth, sensor and anatomical. The relative rotation
 cancels earth but still carries both mounting offsets; uncalibrated, a straight
 wrist reads 11–15°, which is board placement and not anatomy. Calibration
-supplies a per-unit mount quaternion, and **the device applies it itself** —
-both quaternions step discontinuously the instant the result is emitted and the
-relative angle collapses to ~0.4°.
+supplies a per-unit mount quaternion and a per-unit rotation about z — four
+values, and §8.2's result hands all four back — and **the device applies them
+itself**: both quaternions step discontinuously the instant the result is
+emitted and the relative angle collapses to ~0.4°.
 
 So the library issues two markers and reads angles already in the anatomical
 frame. There is no host-side transform to replicate, and none is written "for
@@ -1134,8 +1136,20 @@ markers and the device returned a result and applied it — it was the vendor's
 
 ⚠ **`0x94` is not a verdict.** §8.2: it is emitted for *every* `a2 01` and the
 device applies the transform every time, including attempts an application goes
-on to reject. Nothing on the wire carries accept or reject. A client that treats
+on to reject. Nothing on the wire carries accept or reject — the long form's 64
+bytes are eight quaternions with no field left over for one. A client that treats
 its arrival as success has no failure detection at all.
+
+⚠ **`0x94` has a SHORT FORM, and it is not a truncated long one.** §8.2: the
+device splits the two on the notification's total length, and a status byte
+exists only on the short one. The decoder therefore length-discriminates rather
+than treating 0x94 as fixed-length, because reporting a short form as
+`HM_ERR_TRUNCATED` would drop the device's answer and leave the routine to starve
+on its own result timeout. What the status byte *means* is unknown and the form
+has never been captured, so the session reports the byte
+(`HM_WARN_CALIBRATION_STATUS_FORM`) and acts on it exactly as it acts on the long
+form: the presence measurement decides, because it tests what the device is
+emitting rather than what a byte claims about it.
 
 **Automatic raise detection is not shipped**: it means watching the stream for a
 motion pattern whose criterion is not established. The
@@ -1206,7 +1220,11 @@ data with no error, and an API that cannot express the impossible thing is worth
 more than a comment.
 
 The 64-byte `0x94` payload is carried verbatim into the wire log and deliberately
-not decoded; the device acts on it itself.
+not decoded; the device acts on it itself. ⚠ Not decoding it is now a *choice*
+rather than a gap — §8.2 identifies all eight of its quaternions, four of them
+the calibration state the device applied and four the poses it derived that state
+from. A client has no use for either, since the transform is already in the
+stream, and anything that later wants them has the bytes.
 
 ### 7.5 The presence check — and it is not a score
 
@@ -1229,6 +1247,18 @@ fail.**
 A library that selected between attempts on it would systematically prefer the
 worst one available. So: **there is no API that returns a quality score and no
 API that ranks two attempts.**
+
+⚠ **And the payload's own signal does not fill the hole either.** §8.2's result
+carries both poses per unit, and the angle between them *is* the raise the limb
+performed — 28.9°/30.9° for the routine as specified against 8.5°/7.6° for an
+attempt that barely moved. That is the missing-raise failure, exactly what the
+residual is blind to. It is still not shipped as a score, for two reasons that
+are the library's to weigh rather than the client's: it bounds the raise's
+**size and not its axis**, so the wrong-axis attempt above still scores clean;
+and the decisive validation — a deliberate no-raise attempt captured *with its
+payload* — has never been taken, so the signal is promising and unverified. The
+bytes reach the wire log intact, which is where a promising-and-unverified signal
+belongs until it is one or the other.
 
 Its one sound use is catching *calibration never happened, or was lost* — a
 failure that is otherwise silent, permanent, and reachable mid-session without
@@ -1308,8 +1338,8 @@ Skipping the presence call is allowed; the routine completes with the angle NaN.
 #### The reference-pose anchor, kept rather than discarded
 
 The device applies calibration itself and hands back quaternions in **its**
-anatomical frame; §8.2 leaves the 64-byte result undecoded, correctly, since a
-client does not need it. But a consumer with its own anatomical convention needs
+anatomical frame; this library leaves the 64-byte result undecoded, correctly,
+since a client does not need it. But a consumer with its own anatomical convention needs
 the constant rotation between the two frames, and nothing in the API let it
 solve for one.
 

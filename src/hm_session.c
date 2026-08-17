@@ -3706,13 +3706,31 @@ static void on_message(hm_session *s, hm_decoded *dec, hm_time_us host_recv_us)
              * HM_CAL_UNKNOWN, because the transform is applied and whether it
              * took is exactly what nothing on the wire reports.
              *
+             * ⚠ AND THE LONG FORM CANNOT CARRY A VERDICT EVEN IN PRINCIPLE.
+             * §8.2: all 64 bytes are accounted for — eight quaternions, four
+             * of them the applied state and four the two poses — with no field
+             * left for one.  The status byte belongs to the SHORT form, handled
+             * below.  This is why the presence measurement exists.
+             *
              * The 64-byte payload is carried verbatim into the wire log and
-             * decoded by nobody: the device acts on it itself, and §8.2's two
-             * encoders (4.5 writes only the high byte of each component, 4.8 all
-             * 16 bits) mean a decoder here would have to infer its own precision
-             * from the payload for a value no client needs.
+             * decoded by nobody: the device acts on it itself, so no client
+             * needs the values, and §8.2's two encoders (4.5 writes only the
+             * high byte of each component, 4.8 all 16 bits) mean a decoder here
+             * would have to take its precision from the payload in front of it.
              */
             set_calibration_state(s, HM_CAL_UNKNOWN);
+            if (dec->u.calibration.is_status) {
+                /*
+                 * ⚠ THE SHORT FORM.  §8.2: a status byte instead of the eight
+                 * quaternions, never yet seen on the wire, and no value of it
+                 * is known.  So it is reported and NOT interpreted — the
+                 * routine proceeds exactly as for the long form and the
+                 * presence check decides, because that measures what the device
+                 * is actually emitting rather than what a byte claims.
+                 */
+                warn_now(s, HM_WARN_CALIBRATION_STATUS_FORM,
+                         (int32_t)dec->u.calibration.status, 0.0);
+            }
             if (s->cal_phase != HM_CALP_APPLYING) {
                 /* A result later than our own bound, or one nothing asked for.
                  * Reported, never dropped — the frame changed underneath the

@@ -490,6 +490,19 @@ typedef enum hm_warning_code {
      * per-sample flag drops to HM_CAL_UNKNOWN with it.
      */
     HM_WARN_CALIBRATION_UNSOLICITED,
+    /*
+     * ⚠ The SHORT FORM of `0x94` arrived — the device answered the marker with
+     * a status byte instead of the eight quaternions (§8.2).  `detail_i32`
+     * carries that byte.
+     *
+     * It has never been seen on the wire, and what its values mean is not
+     * known, so the library does not interpret it: the routine proceeds exactly
+     * as it does for the long form, and the presence measurement — which tests
+     * the device's own output rather than the message — decides. The byte is
+     * reported so that it can never be swallowed by a library that could not
+     * read it.
+     */
+    HM_WARN_CALIBRATION_STATUS_FORM,
     HM_WARN_CODE_COUNT
 } hm_warning_code;
 

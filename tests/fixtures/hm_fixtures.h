@@ -94,8 +94,12 @@ static const uint8_t HM_FIX_START_ACK[2] = {0xA0, 0x01};
 /* 0x83 — stop acknowledgement (§4, §6.1). */
 static const uint8_t HM_FIX_STOP_ACK[2] = {0x83, 0x01};
 
-/* 0x94 — calibration result, 64 payload bytes, deliberately undecoded: the
- * device applies the transform itself (§8.2). */
+/*
+ * 0x94 — calibration result, LONG FORM: 64 payload bytes, deliberately
+ * undecoded, because the device applies the transform itself (§8.2).  The
+ * bytes are a counting pattern rather than real quaternions precisely because
+ * nothing decodes them: what is under test is that all 64 survive verbatim.
+ */
 static const uint8_t HM_FIX_CALIBRATION[65] = {
     0x94,
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
@@ -104,6 +108,17 @@ static const uint8_t HM_FIX_CALIBRATION[65] = {
     0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C,
     0x3D, 0x3E, 0x3F, 0x40
 };
+
+/*
+ * 0x94 — calibration result, SHORT FORM (§8.2).  ⚠ The two forms are told
+ * apart by the notification's total length, and the status byte exists only on
+ * this one; the long form above carries no verdict anywhere in it.
+ *
+ * ⚠ SYNTHETIC.  The short form has never been captured, and no value of the
+ * status byte has a known meaning — which is exactly why the library reports
+ * the byte rather than acting on it.
+ */
+static const uint8_t HM_FIX_CALIBRATION_STATUS[2] = {0x94, 0x01};
 
 /* ------------------------------------------------------------------------ */
 /* The single-axis fixture api-request §2.2 asked for.                       */

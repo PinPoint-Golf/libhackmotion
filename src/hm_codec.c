@@ -148,7 +148,6 @@ static int fixed_payload_length(uint8_t id)
         case HM_MSG_ID_SENSOR_MAP:     return 2;
         case HM_MSG_ID_MAC:            return 12;
         case HM_MSG_ID_SERIAL:         return 9;
-        case HM_MSG_ID_CALIBRATION:    return 64;
         case HM_MSG_ID_START_ACK:      return 1;
         case HM_MSG_ID_HISTORY_MARK:   return 1;
         case HM_MSG_ID_CAL_ACK:        return 1;
@@ -247,6 +246,63 @@ static hm_status decode_frame(const uint8_t *data, size_t length, const hm_strea
     return HM_OK;
 }
 
+#define CAL_SHORT_FORM_MAX 63u
+#define CAL_LONG_FORM_LEN  65u
+
+/*
+ * 0x94 — the calibration result.  ⚠ IT IS NOT A FIXED-LENGTH MESSAGE: §8.2
+ * gives it TWO FORMS and the device splits them on the notification's own
+ * total length, which is why it is decoded here rather than through
+ * fixed_payload_length().
+ *
+ *   long form    65 bytes — the id and eight quaternions.  The full result,
+ *                and the only form ever captured.
+ *   short form   63 bytes or fewer — the id and a status byte.  ⚠ The status
+ *                byte exists ONLY here; the long form carries no verdict at
+ *                all (§8.2).
+ *
+ * ⚠ 64 BYTES IS NEITHER, and that is the device's own arithmetic rather than a
+ * choice made here: the split is on total length, 64 is above the short form's
+ * ceiling, so a 64-byte notification is a long form one byte shy of its eighth
+ * quaternion.  Truncated, and reported as such rather than decoded as seven
+ * quaternions and a guess.
+ *
+ * The 64 payload bytes themselves stay undecoded, deliberately: the device
+ * applies the transform itself, so a client never needs the values (§8.2,
+ * api-request §2.6).  They are carried verbatim into the wire log.
+ */
+static hm_status decode_calibration(const uint8_t *data, size_t length, hm_decoded *out)
+{
+    out->kind = HM_MSGK_CALIBRATION_RESULT;
+
+    if (length > CAL_SHORT_FORM_MAX) {
+        if (length < CAL_LONG_FORM_LEN) {
+            return HM_ERR_TRUNCATED;
+        }
+        if (length > CAL_LONG_FORM_LEN) {
+            out->warnings |= WARN(HM_WARN_TRAILING_BYTES);
+        }
+        memcpy(out->u.calibration.payload, data + 1, 64u);
+        out->consumed = CAL_LONG_FORM_LEN;
+        return HM_OK;
+    }
+
+    if (length < 2u) {
+        return HM_ERR_TRUNCATED;
+    }
+    out->u.calibration.is_status = true;
+    out->u.calibration.status = data[1];
+    /*
+     * ⚠ No HM_WARN_TRAILING_BYTES here even when the notification is longer
+     * than two bytes.  What is known about the short form is that its second
+     * byte is a status code; its full length is not known, and warning about
+     * bytes 2..n would assert a length this library cannot support.  `consumed`
+     * says exactly what was interpreted, which is what it is for.
+     */
+    out->consumed = 2u;
+    return HM_OK;
+}
+
 hm_status hm_codec_decode(const uint8_t *data, size_t length, hm_stream_config cfg,
                           hm_decoded *out)
 {
@@ -287,6 +343,11 @@ hm_status hm_codec_decode(const uint8_t *data, size_t length, hm_stream_config c
             out->warnings |= WARN(HM_WARN_LEGACY_STREAM);
         }
         return st;
+    }
+
+    /* --- The calibration result, which is length-discriminated ---------- */
+    if (id == HM_MSG_ID_CALIBRATION) {
+        return decode_calibration(data, length, out);
     }
 
     /* --- Fixed-length messages ------------------------------------------ */
@@ -349,14 +410,6 @@ hm_status hm_codec_decode(const uint8_t *data, size_t length, hm_stream_config c
         case HM_MSG_ID_SERIAL:
             out->kind = HM_MSGK_SERIAL;
             copy_text(out->u.text.text, sizeof(out->u.text.text), data + 1, 9u);
-            break;
-
-        case HM_MSG_ID_CALIBRATION:
-            /* Payload undecoded, and deliberately so: the device applies the
-             * transform itself, so a client never needs it (§8.2, api-request
-             * §2.6).  It is carried verbatim into the wire log. */
-            out->kind = HM_MSGK_CALIBRATION_RESULT;
-            memcpy(out->u.calibration.payload, data + 1, 64u);
             break;
 
         case HM_MSG_ID_START_ACK:

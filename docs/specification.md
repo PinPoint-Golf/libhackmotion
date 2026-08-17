@@ -234,7 +234,7 @@ to every byte the device could conceivably emit.
 | `0x85` | MAC address |
 | `0x86` | Serial number |
 | `0x90` | **Sensor stream frame** — §6.3 |
-| `0x94` | Calibration result — §8.2 |
+| `0x94` | Calibration result — §8.2. ⚠ **Two forms**, told apart by the notification's length |
 | `0xa1` | History start/end marker — §7.2 |
 | `0xa2` | Calibration pose set result |
 | `0xd0` | **Device error**, one payload byte — only `03` has ever been seen (§7.2) |
@@ -855,7 +855,9 @@ and **anatomical** (the wrist's own axes).
 2. The relative rotation `q_palm ⊗ q_arm*` cancels earth — which is why a swing can face any
    direction — but still carries both mounting offsets. Uncalibrated, a straight wrist reads
    11–15°, which is board placement, not anatomy.
-3. Calibration supplies a per-unit **mount quaternion** mapping sensor → anatomical.
+3. Calibration supplies a per-unit **mount quaternion** mapping sensor → anatomical, plus a
+   per-unit **rotation about z** carrying the heading the raise revealed. Those four values are
+   the whole calibration state, and the device hands all four back in §8.2's result.
 4. **The device applies it itself.** Both quaternions step discontinuously the instant the
    result is emitted (56° and 79° within one 30 ms record) and the relative angle collapses to
    ~0.4°.
@@ -872,11 +874,11 @@ axis the motion occurred about, and that axis plus gravity pins the full anatomi
 ```
 -> a2 00     <- a2 01        pose 0: forearm horizontal, wrist straight
 -> a2 01     <- a2 01        pose 1: forearm raised ~30° across the chest
-             <- 94 + 64      calibration result; eight quaternions, four of them identified
+             <- 94 + 64      calibration result; eight quaternions, all identified
 ```
 
 The device re-references its own stream at the moment `0x94` is emitted. A client does not need
-the payload, since the transform is applied on-device — but it is no longer opaque, and what is
+the payload, since the transform is applied on-device — but it is not opaque, and what is
 in it bears directly on the quality problem below.
 
 **⚠ The stream must already be running.** Calibration is not a standalone transaction: the
@@ -884,23 +886,54 @@ device observes a *continuous raise* between the two markers, which cannot be do
 static samples. Start streaming first (§6.1), then send the markers. Measured order is
 `a0 01 7e`, then `a2 00` 40 s later, with the stream running throughout and never stopped.
 
-#### The `0x94` payload is eight quaternions, and four of them are the two poses
+#### ⚠ `0x94` has two forms, and the length is what tells them apart
 
-**Layout: 64 bytes = eight quaternions, each four `i16be` in `w x y z` scaled by 16384** — the
-same encoding a record carries its orientation in (§6.3, §6.4). The structure identifies itself:
-read that way all eight have |q| = 16384, which no other alignment or endianness produces.
-
-| | What it is | Angle from the streamed orientation at that marker |
+| Form | Length | Contents |
 |---|---|---|
-| q1–q4 | not identified — a parser skips them | |
-| **q5** | **palm unit at the `a2 00` marker** | **0.06°** / 0.3° |
-| **q6** | **palm unit at the `a2 01` marker** | **0.11°** / 2.7° |
-| **q7** | **lower-arm unit at the `a2 00` marker** | **0.52°** / 0.7° |
-| **q8** | **lower-arm unit at the `a2 01` marker** | **1.80°** / unresolved |
+| **Long** | 65 bytes — the id and 64 payload bytes | Eight quaternions. **No status byte anywhere in it.** |
+| **Short** | 63 bytes or fewer | A single **status code**, in the byte after the id |
 
-Two captures, one figure each: a library bench capture with a full ~30° raise, and the
-app-driven `07-calibration`, whose raise was barely 4° — too small for its q8 to be separated
-from the pose-0 value at that payload's precision.
+The device splits on the notification's *total* length, so **64 bytes is neither**: it is above
+the short form's ceiling and one byte shy of the long form's eighth quaternion. Treat it as
+truncated rather than salvaging seven quaternions and guessing the eighth.
+
+Every payload ever captured is the long form. **The short form has never been observed and no
+value of its status code has a known meaning** — but a parser must not decode a short `0x94` as
+a truncated long one, because that discards the only form that carries a verdict-shaped field at
+all. See the verdict warning below for why the distinction matters.
+
+#### The long form is eight quaternions, and all eight are identified
+
+**Layout: 64 bytes = eight quaternions, each four `i16be` in `w x y z` order** — the same
+component order and endianness a record carries its orientation in (§6.3, §6.4). No gaps, no
+padding, no reordering: slot order is byte order.
+
+| | Offset | What it is | Angle from the streamed orientation at that marker |
+|---|---|---|---|
+| **q1** | 0–7 | **palm unit — rotation about z** | |
+| **q2** | 8–15 | **palm unit — mount quaternion** | |
+| **q3** | 16–23 | **lower-arm unit — rotation about z** | |
+| **q4** | 24–31 | **lower-arm unit — mount quaternion** | |
+| **q5** | 32–39 | **palm unit at the `a2 00` marker** | **0.06°** / 0.3° |
+| **q6** | 40–47 | **palm unit at the `a2 01` marker** | **0.11°** / 2.7° |
+| **q7** | 48–55 | **lower-arm unit at the `a2 00` marker** | **0.52°** / 0.7° |
+| **q8** | 56–63 | **lower-arm unit at the `a2 01` marker** | **1.80°** / unresolved |
+
+So the payload is **the complete calibration state the device computed, followed by the two
+poses it computed that state from**: one mount quaternion and one rotation-about-z per unit,
+which is exactly the per-unit state model the device maintains, and then the four pose readings.
+The field names are the vendor's own, translated into this document's palm / lower-arm
+vocabulary.
+
+The two pose columns carry one figure each from two captures: a library bench capture with a
+full ~30° raise, and the app-driven `07-calibration`, whose raise was barely 4° — too small for
+its q8 to be separated from the pose-0 value at that payload's precision.
+
+**⚠ `q1` and `q3` have `x = y = 0` exactly**, not approximately: they are pure rotations about z
+by construction, reducing to `(w, x, y, z) = (cos θ/2, 0, 0, sin θ/2)`. Those four exact zeros
+are a property of the *field*, not of the pose, so they are a free structural check that a
+payload has been located correctly — and see the counting warning below for the one place they
+mislead.
 
 ⚠ **The unit order is the reverse of a record's.** A `0x90` record puts the lower arm first
 (§6.3); this payload puts the **palm** first. Measured on both captures, with the two units
@@ -914,6 +947,11 @@ at stream start it can run seconds behind (§10): in the bench capture the first
 and the payload appears to hold the *raised* pose first. Mapped through the index, the order is
 `a2 00` then `a2 01` — pose 0 first, in both captures.
 
+The field names settle it independently, which is the point of naming them: **pose 0 comes first
+within each pair**, and that conclusion now rests on the layout rather than on any timing
+reconstruction. The warning above stands for anyone verifying the payload against a live stream,
+where the trap is easy to fall into and reverses the answer.
+
 **The separation within each pair is the raise that was actually performed:**
 
 | Raise, measured from the stream between the markers | q5–q6 (palm) | q7–q8 (arm) |
@@ -922,8 +960,17 @@ and the payload appears to hold the *raised* pose first. Mapped through the inde
 | 7.6° palm / 8.1° arm | 11.7° | 10.2° |
 | 4.2° palm / 4.7° arm | 8.5° | 7.6° |
 
-So the payload carries the one thing the presence check below is blind to — whether the raise
-happened at all, and about which axis.
+So the payload carries the one thing the presence check below is structurally blind to — whether
+the raise happened at all. A calibration with no raise leaves the anatomical frame undetermined
+while scoring *perfectly* on the residual, and a separation far below the routine's ~30° target
+is the signal that says so.
+
+⚠ **But it bounds the raise's SIZE, not its AXIS.** A large raise about the wrong axis scores
+exactly as well as a correct one, so this catches the missing-raise failure and not the
+wrong-raise failure — which the residual, measured below, also fails to catch. And the decisive
+test has not been run: a deliberate no-raise attempt, which should show both pairs near zero,
+has never been captured with its payload. **Treat the separation as a promising signal rather
+than a validated one**, and do not build an accept/reject gate on it alone.
 
 **Precision is not the same in every payload, and a parser must not assume 16 bits.** The three
 payloads captured on firmware 4.5 carry only the **high byte** of each component — every one is an
@@ -950,6 +997,51 @@ the data rather than in any decoder, so **a parser should take the precision fro
 front of it** — and must not reject a coarse one as malformed, since |q| off by 200 counts is the
 correct reading of a real device's output.
 
+#### ⚠ Normalise. Do not scale and validate
+
+**There is no fixed-point scale in this payload.** The four `i16be` components are sign-extended
+and normalised; the 16384 is implicit in the normalisation and is never divided out. That is not
+a stylistic preference, it is what makes a decoder work across firmware revisions:
+
+```
+w, x, y, z = i16be × 4                      # sign-extended
+n          = sqrt(w² + x² + y² + z²)        # reject only n == 0
+q          = (w/n, x/n, y/n, z/n)           # unit, (w, x, y, z)
+```
+
+**A parser that divides by 16384 and then range-checks the norm rejects real device output**, on
+every coarse payload above. A parser that normalises never notices the difference. The norms are
+worth *reporting* as a structural check — a correctly located payload is within a few hundred
+counts of 16384, never within 1 — but they must not be a validity gate.
+
+#### What the four state quaternions are
+
+The two poses and the four applied state quaternions are related. Taking one unit's pose pair as
+the reference:
+
+```
+q_rel      = Pose1⁻¹ ⊗ Pose2                    of the reference unit
+axis, θ    = axis-angle decomposition of q_rel
+heading    = atan2(axis.y, axis.x) ± π           (+π if negative, −π otherwise)
+RotationZ  = quaternion(axis = (0,0,1), angle = heading)
+Mount[n]   = (Pose1[n] ⊗ RotationZ)⁻¹
+```
+
+with `⊗` the Hamilton product in the standard convention. Checked against two captured payloads,
+using each payload's own `RotationZ` and comparing against its own `Mount`, this lands **3.61° /
+1.73°** and **1.77° / 1.96°** out (palm / arm) — agreement, given ~1° per component compounding
+through a product, and better than the next candidate form by a factor of two or more.
+
+The heading agrees too. Taking the **lower-arm** pose pair as the reference, the payload's palm
+`RotationZ` sits 2.62° / 1.23° from the raw heading and its lower-arm `RotationZ` 2.05° / 1.37°
+from the flipped one.
+
+⚠ **This is the form, not a reproduction of the device.** That last figure is the tell: the two
+units' `RotationZ` values in a real payload are **180.6°** and **180.2°** apart, so the firmware
+applies the ±π flip to one unit and not the other, and one heading computed once for both units
+does not reproduce that. **A client reads the payload; it has no reason to derive it**, and must
+not present a locally computed result as equivalent to the device's.
+
 #### ⚠ `0x94` is not a verdict, and the device does not judge the attempt
 
 `0x94` is the device answering the marker. **It is emitted for every `a2 01`, and the device
@@ -957,7 +1049,10 @@ applies the transform every time** — including for attempts a user-facing appl
 to reject. Two consequences:
 
 - **Nothing on the wire carries accept/reject.** A client that treats the arrival of `0x94` as
-  success has no failure detection at all. Any verdict is the client's own to compute.
+  success has no failure detection at all. Any verdict is the client's own to compute. The long
+  form cannot carry one even in principle: all 64 bytes are accounted for by the eight
+  quaternions above, with no field left over — and the status byte belongs to the short form,
+  which no device has ever been seen to send in answer to `a2 01`.
 - **The device imposes no observed deadline** between the two markers. One attempt took
   **15.6 s** between `a2 00` and `a2 01`; the device returned a result and applied it, and it
   was the *application* that rejected it as too slow. Any time limit is therefore client policy,
@@ -1342,11 +1437,12 @@ while a retrieval is in flight either**, mid-stream or not, for as long as the r
 (§7.5). The device cannot record and replay at the same time, which is the one limit that shapes
 the capture cycle in §7.6.
 
-**Undecoded fields.** Four small ones, none of which a client needs: two bytes of the
+**Undecoded fields.** Three small ones, none of which a client needs: two bytes of the
 battery/status reply that drift slowly and are not millivolts (§5.3); the second byte of the
-sensor-map reply (§5.4); **half of the calibration result — four of its eight quaternions**, the
-other four being the two poses per unit (§8.2); and two bits of the stream configuration byte,
-which the vendor app always sets (§6.2).
+sensor-map reply (§5.4); and two bits of the stream configuration byte, which the vendor app
+always sets (§6.2). **The calibration result is no longer among them** — all eight of its
+quaternions are identified (§8.2) — but the **status byte on its short form** is: no value of it
+has ever been captured, and the form itself has never been seen on the wire.
 
 **Unobserved behaviour.** Whatever makes the live sample rate change (§6.6). The legacy frame
 layout has likewise never appeared outside a deliberate legacy start.

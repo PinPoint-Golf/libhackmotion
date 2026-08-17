@@ -13,9 +13,11 @@
  *
  * RECORD THE WIRE BYTES, NOT THE DECODED SAMPLES (design §5.6, api-request
  * §2.9).  spec §12 still lists undecoded fields — two bytes of the battery
- * reply, the second sensor-map byte, the 64-byte calibration payload, two
- * configuration bits — and §6.6's burst trigger and §10's unexplained drift are
- * open.  When any of those is settled a byte-level recording can be RE-DECODED
+ * reply, the second sensor-map byte, two configuration bits, the status byte on
+ * §8.2's short-form calibration result — the 64-byte calibration payload is
+ * understood but decoded by nothing here, and §6.6's burst trigger and §10's
+ * unexplained drift are open.  When any of those is settled a byte-level
+ * recording can be RE-DECODED
  * with the fix applied; a sample-level one cannot, because it has already
  * discarded the bytes the fix would have interpreted differently.
  *

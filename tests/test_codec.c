@@ -422,8 +422,80 @@ HM_TEST(codec_decodes_calibration_result)
                  HM_OK);
     HM_ASSERT_EQ(d.kind, HM_MSGK_CALIBRATION_RESULT);
     HM_ASSERT_EQ(d.consumed, 65);
+    HM_ASSERT(!d.u.calibration.is_status);
     HM_ASSERT_EQ(d.u.calibration.payload[0], 0x01);
     HM_ASSERT_EQ(d.u.calibration.payload[63], 0x40);
+    HM_ASSERT_EQ(d.warnings, 0u);
+
+    /* Past the long form's 65 bytes there is nothing to interpret: the eight
+     * quaternions are still decoded and the remainder is reported rather than
+     * absorbed, exactly as for any other over-long notification. */
+    {
+        uint8_t over[70];
+        memset(over, 0xEE, sizeof(over));
+        memcpy(over, HM_FIX_CALIBRATION, sizeof(HM_FIX_CALIBRATION));
+        HM_ASSERT_EQ(hm_codec_decode(over, sizeof(over), hm_stream_config_default(), &d), HM_OK);
+        HM_ASSERT_EQ(d.kind, HM_MSGK_CALIBRATION_RESULT);
+        HM_ASSERT_EQ(d.consumed, 65);
+        HM_ASSERT_EQ(d.u.calibration.payload[63], 0x40);
+        HM_ASSERT(d.warnings & (1u << HM_WARN_TRAILING_BYTES));
+    }
+}
+
+/*
+ * ⚠ §8.2 — `0x94` HAS TWO FORMS AND THE DEVICE SPLITS THEM ON TOTAL LENGTH.
+ * A short one is not a truncated long one, and decoding it as such would drop
+ * the only form that carries a status byte at all.
+ */
+HM_TEST(codec_decodes_the_short_form_of_the_calibration_result)
+{
+    hm_decoded d;
+
+    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_CALIBRATION_STATUS, sizeof(HM_FIX_CALIBRATION_STATUS),
+                                 hm_stream_config_default(), &d),
+                 HM_OK);
+    HM_ASSERT_EQ(d.kind, HM_MSGK_CALIBRATION_RESULT);
+    HM_ASSERT(d.u.calibration.is_status);
+    HM_ASSERT_EQ(d.u.calibration.status, 0x01);
+    HM_ASSERT_EQ(d.consumed, 2);
+    /* The quaternion buffer is not left holding something that looks decoded. */
+    HM_ASSERT_EQ(d.u.calibration.payload[0], 0x00);
+    HM_ASSERT_EQ(d.warnings, 0u);
+
+    /* The whole short range decodes, up to the device's own 63-byte ceiling —
+     * and `consumed` claims only the byte that was read, never the rest. */
+    {
+        uint8_t msg[63];
+        memset(msg, 0xEE, sizeof(msg));
+        msg[0] = 0x94;
+        msg[1] = 0x7F;
+        for (size_t n = 2; n <= sizeof(msg); ++n) {
+            HM_ASSERT_EQ(hm_codec_decode(msg, n, hm_stream_config_default(), &d), HM_OK);
+            HM_ASSERT(d.u.calibration.is_status);
+            HM_ASSERT_EQ(d.u.calibration.status, 0x7F);
+            HM_ASSERT_EQ(d.consumed, 2);
+        }
+    }
+
+    /* The id on its own has no status byte in it. */
+    {
+        const uint8_t bare[1] = {0x94};
+        HM_ASSERT_EQ(hm_codec_decode(bare, sizeof(bare), hm_stream_config_default(), &d),
+                     HM_ERR_TRUNCATED);
+    }
+
+    /*
+     * ⚠ 64 BYTES IS NEITHER FORM.  Above the short form's ceiling, so it is a
+     * long form one byte shy of its eighth quaternion — truncated, and not to
+     * be salvaged as seven quaternions and a guess.
+     */
+    {
+        uint8_t msg[64];
+        memset(msg, 0, sizeof(msg));
+        msg[0] = 0x94;
+        HM_ASSERT_EQ(hm_codec_decode(msg, sizeof(msg), hm_stream_config_default(), &d),
+                     HM_ERR_TRUNCATED);
+    }
 }
 
 /* §5.1 — anything not in the table is logged and ignored, NOT an error. */

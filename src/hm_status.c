@@ -95,6 +95,7 @@ const char *hm_warning_code_name(hm_warning_code code)
         case HM_WARN_CALIBRATION_INDETERMINATE: return "calibration_indeterminate";
         case HM_WARN_CALIBRATION_ABSENT:  return "calibration_absent";
         case HM_WARN_CALIBRATION_UNSOLICITED: return "calibration_unsolicited";
+        case HM_WARN_CALIBRATION_STATUS_FORM: return "calibration_status_form";
         case HM_WARN_CODE_COUNT:          break;
     }
     return "invalid";

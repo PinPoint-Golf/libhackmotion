@@ -120,19 +120,47 @@ typedef struct hm_decoded {
         } button;
         struct {
             /*
-             * The device acts on this itself and §8.2 is explicit that `0x94`
-             * is NOT a verdict, so the library keeps it opaque and records the
-             * bytes (design §5.6).  What it contains is nonetheless known:
-             * eight Q14 unit quaternions, i16be, w-x-y-z — the stream's own
-             * encoding — being pose 0 and the raise for each unit, ⚠ PALM
-             * FIRST, which is reversed from a stream record (§6.3).
+             * ⚠ TWO FORMS, discriminated by the notification's LENGTH (§8.2).
+             * `is_status` says which one arrived.
              *
-             * ⚠ Two encoders exist.  Firmware 4.5 populates only the HIGH BYTE
-             * of each component (|q| within ~200 of 16384, poses good to about
-             * a degree); 4.8 uses all 16 bits.  Anything that ever decodes this
-             * must take precision from the payload and must NOT reject a coarse
-             * one as malformed.  docs/capture-findings.md §2 has the evidence.
+             *   long form   65 bytes: `payload` holds the eight quaternions.
+             *   short form  63 bytes or fewer: `status` holds the one status
+             *               byte, and `payload` is zeroed.
+             *
+             * ⚠ The status byte exists only on the SHORT form.  The long form
+             * carries no accept/reject anywhere in it, which is why arrival of
+             * a `0x94` is not a verdict (§8.2) and the session's own presence
+             * measurement is the only thing that decides.
+             *
+             * The long form's 64 bytes are still not decoded here, and that is
+             * a decision rather than a gap: the device applies the transform
+             * itself, so a client never needs the values (design §5.6, §7.4).
+             * They are carried verbatim into the wire log, where anything that
+             * wants them can re-decode them.  All eight are now identified:
+             *
+             *   q1  palm, rotation about z     q2  palm, mount quaternion
+             *   q3  arm,  rotation about z     q4  arm,  mount quaternion
+             *   q5  palm at pose 0             q6  palm at pose 1
+             *   q7  arm  at pose 0             q8  arm  at pose 1
+             *
+             * — the four applied state quaternions, then the two poses they
+             * were derived from.  q1 and q3 have x = y = 0 EXACTLY, being pure
+             * rotations about z by construction, which is a free structural
+             * check on the payload.
+             *
+             * ⚠ PALM FIRST, in both halves — reversed from a stream record,
+             * which puts the lower arm first (§6.3).
+             *
+             * ⚠ AND A DECODER MUST NORMALISE RATHER THAN SCALE.  Each
+             * quaternion is four i16be in w-x-y-z order, but the fixed-point
+             * scale is implicit: firmware 4.5 populates only the HIGH BYTE of
+             * each component, so |q| lands ~200 counts off 16384 and each
+             * quaternion is good to about a degree, while 4.8 uses all 16 bits.
+             * Dividing by 16384 and range-checking the norm rejects real device
+             * output; normalising does not care.  §8.2 has the evidence.
              */
+            bool    is_status;
+            uint8_t status;
             uint8_t payload[64];
         } calibration;
     } u;
