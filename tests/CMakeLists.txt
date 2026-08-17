@@ -49,6 +49,20 @@ endforeach()
 # would produce a capture that only turns out to be unreadable later, by which
 # time the sensor and the session are gone.  Skipped, loudly, with no python3.
 if(HM_BUILD_TOOLS AND HM_BUILD_RECORD)
+    # ⚠ macOS: PREFER THE INTERPRETER ON PATH OVER THE FRAMEWORK ONE, because the
+    # framework FindPython3 picks by default is the Command Line Tools' Python
+    # 3.9 — a SIGNED PLATFORM BINARY, and that is not a cosmetic difference here.
+    # Any sanitizer runtime dlopen()ed into such a process is refused outright
+    # (`Sanitizer load violates platform policy`), so a UBSan build's four Python
+    # tests fail on the interpreter that was chosen for them rather than on
+    # anything in this repository.  A PATH python (Homebrew, python.org, a venv)
+    # is not a platform binary and loads it; measured under -DHM_ENABLE_UBSAN=ON,
+    # all 23 tests pass there against 19-and-4-failures on the framework one.  It
+    # is also an end-of-life 3.9 against whatever the developer actually runs.
+    # No effect off Apple: FRAMEWORK is only consulted on macOS.
+    if(APPLE AND NOT DEFINED Python3_FIND_FRAMEWORK)
+        set(Python3_FIND_FRAMEWORK LAST)
+    endif()
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
         add_test(NAME capture_format
@@ -181,30 +195,77 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD AND HM_BUILD_FFI AND Python3_Interpreter_F
     # This is why the sanitizer job passed under gcc here and failed under clang
     # in CI on the same source.
     if((HM_ENABLE_ASAN OR HM_ENABLE_UBSAN) AND NOT MSVC)
-        set(HM_SAN_RUNTIME "")
-        execute_process(COMMAND ${CMAKE_C_COMPILER} -print-file-name=libasan.so
-                        OUTPUT_VARIABLE HM_SAN_RUNTIME
-                        OUTPUT_STRIP_TRAILING_WHITESPACE
-                        ERROR_QUIET)
-        if(NOT EXISTS "${HM_SAN_RUNTIME}")
-            execute_process(COMMAND ${CMAKE_C_COMPILER} -print-runtime-dir
-                            OUTPUT_VARIABLE HM_SAN_RTDIR
-                            OUTPUT_STRIP_TRAILING_WHITESPACE
-                            ERROR_QUIET)
-            file(GLOB HM_SAN_CANDIDATES "${HM_SAN_RTDIR}/libclang_rt.asan*.so")
-            if(HM_SAN_CANDIDATES)
-                list(GET HM_SAN_CANDIDATES 0 HM_SAN_RUNTIME)
-            endif()
-        endif()
-        if(EXISTS "${HM_SAN_RUNTIME}")
+        #
+        # ⛔ macOS + ASan IS THE ONE CASE WHERE THE PRELOAD CANNOT EXIST, so it is
+        # the one case that skips instead of failing.  The rule above — a missing
+        # preload FAILS — is right when the preload is merely absent, because that
+        # is a misconfiguration someone can fix.  Here it is refused by the OS:
+        #
+        #   dyld: `Sanitizer load violates platform policy`
+        #
+        # The Command Line Tools' libclang_rt.asan_osx_dynamic.dylib is a signed
+        # platform binary that recent macOS will only load into an image LINKED
+        # against it.  ctypes dlopen()s ours instead, and DYLD_INSERT_LIBRARIES —
+        # the LD_PRELOAD equivalent — is stripped for it no matter what the host
+        # process is.  Measured on macOS 27 / AppleClang 21: stripped even for a
+        # freshly built, unsigned, non-hardened local executable, so this is the
+        # DYLIB being restricted and not the interpreter being protected.  A
+        # non-Apple runtime (full Xcode, Homebrew LLVM) is not subject to it and
+        # would let these run; the Command Line Tools alone cannot.
+        #
+        # ⚠ DISABLED, not unregistered.  ctest then lists them as disabled on every
+        # run, so the coverage this platform is missing stays legible instead of a
+        # macOS sanitizer build looking as green as a Linux one.
+        #
+        # ⚠ What is lost here is only the ASan half, and CI covers it: the
+        # sanitizer job runs under gcc on Linux, where the preload is an ordinary
+        # LD_PRELOAD.
+        #
+        # ⚠ UBSan IS DELIBERATELY NOT IN THIS SKIP, and the difference is the
+        # preload rather than the policy.  UBSan needs no interceptors, so its
+        # runtime arrives by ordinary dlopen of the rpath — which the same policy
+        # refuses ONLY when the host process is a platform binary.  That is exactly
+        # the interpreter chosen above, so `-DHM_ENABLE_UBSAN=ON` runs all four
+        # tests on a PATH python and would fail all four on the framework one.
+        # ASan cannot be recovered that way: it needs DYLD_INSERT_LIBRARIES, which
+        # is stripped for this runtime whatever the host.
+        if(APPLE AND HM_ENABLE_ASAN)
             set_tests_properties(python_abi python_replay_parity python_lifetime
                 python_transport_loopback
-                PROPERTIES ENVIRONMENT
-                "LD_PRELOAD=${HM_SAN_RUNTIME};ASAN_OPTIONS=detect_leaks=0;PYTHONIOENCODING=utf-8")
-        else()
+                PROPERTIES DISABLED TRUE)
             message(STATUS
-                "python binding tests: no sanitizer runtime from ${CMAKE_C_COMPILER}; "
-                "they will run without the preload and are expected to fail")
+                "python binding tests: DISABLED under ASan on macOS — dyld refuses "
+                "to preload the Command Line Tools' ASan runtime into a ctypes host "
+                "(`Sanitizer load violates platform policy`). The Linux/gcc CI "
+                "sanitizer job is what covers them.")
+        else()
+            set(HM_SAN_RUNTIME "")
+            execute_process(COMMAND ${CMAKE_C_COMPILER} -print-file-name=libasan.so
+                            OUTPUT_VARIABLE HM_SAN_RUNTIME
+                            OUTPUT_STRIP_TRAILING_WHITESPACE
+                            ERROR_QUIET)
+            if(NOT EXISTS "${HM_SAN_RUNTIME}")
+                execute_process(COMMAND ${CMAKE_C_COMPILER} -print-runtime-dir
+                                OUTPUT_VARIABLE HM_SAN_RTDIR
+                                OUTPUT_STRIP_TRAILING_WHITESPACE
+                                ERROR_QUIET)
+                file(GLOB HM_SAN_CANDIDATES "${HM_SAN_RTDIR}/libclang_rt.asan*.so")
+                if(HM_SAN_CANDIDATES)
+                    list(GET HM_SAN_CANDIDATES 0 HM_SAN_RUNTIME)
+                endif()
+            endif()
+            if(EXISTS "${HM_SAN_RUNTIME}")
+                set_tests_properties(python_abi python_replay_parity python_lifetime
+                    python_transport_loopback
+                    PROPERTIES ENVIRONMENT
+                    "LD_PRELOAD=${HM_SAN_RUNTIME};ASAN_OPTIONS=detect_leaks=0;PYTHONIOENCODING=utf-8")
+            elseif(HM_ENABLE_ASAN)
+                # ⚠ ASan only.  A UBSan-only build needs no preload on any platform
+                # this reaches, so warning there would be crying wolf.
+                message(STATUS
+                    "python binding tests: no sanitizer runtime from ${CMAKE_C_COMPILER}; "
+                    "they will run without the preload and are expected to fail")
+            endif()
         endif()
     endif()
 endif()

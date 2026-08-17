@@ -124,15 +124,24 @@ if(_hm_san)
     # this build was green on the development machine and red in CI on exactly
     # the same source.  Link-only — clang warns the flag is unused when
     # compiling, and -Werror would make that fatal.
+    #
+    # ⚠ APPLE IS THE EXCEPTION: ld64 warns `duplicate -rpath ... ignored` on
+    # every link, because -shared-libsan already had the driver add exactly this
+    # path.  The warning is harmless and the rpath is right either way, but it
+    # fires once per target and trains the eye to skim linker output — which is
+    # the opposite of what -Werror is for.  ld on Linux adds nothing of its own,
+    # so there the explicit flag is load-bearing and must stay.
     if(CMAKE_C_COMPILER_ID MATCHES "Clang")
         target_link_options(hm_build_flags INTERFACE -shared-libsan)
-        execute_process(COMMAND ${CMAKE_C_COMPILER} -print-runtime-dir
-                        OUTPUT_VARIABLE _hm_rtdir
-                        OUTPUT_STRIP_TRAILING_WHITESPACE
-                        ERROR_QUIET)
-        if(IS_DIRECTORY "${_hm_rtdir}")
-            target_link_options(hm_build_flags INTERFACE
-                                "-Wl,-rpath,${_hm_rtdir}")
+        if(NOT APPLE)
+            execute_process(COMMAND ${CMAKE_C_COMPILER} -print-runtime-dir
+                            OUTPUT_VARIABLE _hm_rtdir
+                            OUTPUT_STRIP_TRAILING_WHITESPACE
+                            ERROR_QUIET)
+            if(IS_DIRECTORY "${_hm_rtdir}")
+                target_link_options(hm_build_flags INTERFACE
+                                    "-Wl,-rpath,${_hm_rtdir}")
+            endif()
         endif()
     endif()
 endif()

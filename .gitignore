@@ -25,3 +25,9 @@ compile_commands.json
 *.hmwire
 !tests/fixtures/*.hmwire
 __pycache__/
+
+# Claude-specific artefacts stay local, as in PinPoint Studio's tree: notes and
+# skills are working material rather than a contract, and settings.local.json is
+# per-machine permission state that means nothing to anyone else.
+CLAUDE.md
+.claude/
