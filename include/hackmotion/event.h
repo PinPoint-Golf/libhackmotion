@@ -360,8 +360,16 @@ typedef enum hm_warning_code {
      * the one-call-one-notification contract this should never happen, so it is
      * the signature of a coalescing transport and is meant to be loud. */
     HM_WARN_TRAILING_BYTES,
-    /* More records in one notification than §6.3 describes.  Decoded and
-     * reported rather than silently truncated. */
+    /*
+     * More records in one notification than has ever been observed.  Decoded
+     * and reported rather than silently truncated.
+     *
+     * ⚠ NOT a claim that the frame is malformed.  §6.3: the encoding puts NO
+     * upper bound on records per notification — one or two is what fits a
+     * 96-byte MTU, not a limit of the format — so a third is unobserved rather
+     * than illegal, and it is decoded like any other.  The warning says the
+     * stream has left the ground this specification was measured on.
+     */
     HM_WARN_UNEXPECTED_RECORD_COUNT,
     HM_WARN_QUAT_NORM,             /* structural check failed — decode may be misaligned */
     HM_WARN_INDEX_REGRESSION,
@@ -503,6 +511,18 @@ typedef enum hm_warning_code {
      * read it.
      */
     HM_WARN_CALIBRATION_STATUS_FORM,
+    /*
+     * ⚠ The `0x84` sensor map reports a sensor count this library's record
+     * layout cannot decode.  `detail_i32` carries the count.
+     *
+     * §6.3's record is a header followed by one block PER SENSOR, so the record
+     * size depends on the count; every layout this library knows has exactly
+     * two.  A different count means the stream is being read at the wrong
+     * offsets from the second block onwards, and it is reported when the MAP
+     * arrives rather than left to the per-record quaternion-norm check, which
+     * would fire on every record without ever naming the cause.
+     */
+    HM_WARN_SENSOR_COUNT_UNSUPPORTED,
     HM_WARN_CODE_COUNT
 } hm_warning_code;
 

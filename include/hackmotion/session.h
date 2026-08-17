@@ -96,8 +96,8 @@ HM_API size_t hm_command_allowlist(uint8_t *out, size_t max);
 /* ------------------------------------------------------------------------ */
 /*
  * RECORD THE WIRE BYTES, NOT THE DECODED SAMPLES.  §12 still lists undecoded
- * fields — two bytes of the battery reply, the second sensor-map byte, two
- * configuration bits, the status byte on §8.2's short-form calibration result —
+ * fields — two bytes of the battery reply, two configuration bits, the status
+ * byte on §8.2's short-form calibration result —
  * the 64-byte calibration payload is understood but decoded by nothing here, and
  * §6.6's burst trigger and §10's unexplained drift are open.  When any of those is settled,
  * a byte-level recording can be RE-DECODED with the fix applied; a sample-level

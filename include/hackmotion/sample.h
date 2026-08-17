@@ -228,6 +228,23 @@ typedef struct hm_sample {
      * primary output.  Being stable it is subtractable as a constant — but it
      * is carried explicitly rather than silently pairing the two blocks as
      * simultaneous.
+     *
+     * ⚠ THE TWO BLOCKS *ARE* ONE SAMPLE, and this field is not evidence against
+     * that.  §6.3: a record carries ONE header, read once and applying to every
+     * block in it, so the two units share a sample index by construction.  What
+     * they do not share is a tick counter — two free-running MCU timers, hence
+     * this number.  One sample, two clocks.
+     *
+     * ⚠ THIS IS THIS RECORD'S DIFFERENCE, AND ONE OF THEM IS NOT THE SKEW.
+     * Single-record readings are dominated by ±½-sample pairing jitter and
+     * scatter widely — 89 and 99 ticks on two consecutive records of one
+     * capture, against a session median of 59 (§10.3).  The stable 0.92 ms is a
+     * SESSION-LEVEL figure and only appears after aggregating.
+     *
+     * The per-record value is carried anyway, because it is what was measured
+     * and aggregating it is the consumer's choice to make — but a client that
+     * subtracts one sample's `skew_us` from that sample is subtracting mostly
+     * jitter, and should take a median over a run instead.
      */
     int32_t    skew_us;
 

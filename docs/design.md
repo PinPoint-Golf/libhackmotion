@@ -636,10 +636,16 @@ state, expects the gap, does not read it as failure and does not retry into it.
 ### 5.6 The wire log
 
 ⚠ **Record the wire bytes, not the decoded samples**. §12 still lists
-undecoded fields — two bytes of the battery reply, the second sensor-map byte,
-two configuration bits, the status byte on §8.2's short-form calibration result
-— the 64-byte calibration payload is understood but decoded by nothing here, and
-§6.6's burst trigger and §10's unexplained drift are open. When any of those is settled, a
+undecoded fields — two bytes of the battery reply, two configuration bits, the
+status byte on §8.2's short-form calibration result — the 64-byte calibration
+payload is understood but decoded by nothing here, and §6.6's burst trigger and
+§10's unexplained drift are open.
+
+⚠ **This has already paid out twice.** The `0x94` payload was captured before
+anyone knew what it held; the second sensor-map byte was carried as "undecoded"
+and turned out to be the second sensor's location code, one of the three things
+that fix which block is which (§5.4). Both were re-decoded out of recordings
+taken before the answer existed. When any of the rest is settled, a
 byte-level recording can be **re-decoded with the fix applied**; a sample-level
 one cannot, because it has already discarded the bytes the fix would have
 interpreted differently.

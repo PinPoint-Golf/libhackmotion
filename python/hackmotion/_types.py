@@ -55,6 +55,7 @@ HM_WIRE_CHUNK_MAX = 256
 HM_DEVICE_ID_MAX = 64
 HM_SERIAL_MAX = 16
 HM_MAC_STRING_MAX = 18
+HM_SENSOR_LOCATION_MAX = 4
 HM_PROVENANCE_MAX = 64
 HM_CONFIG_JUSTIFICATION_MAX = 64
 HM_RECORD_CLOCK_MAX = 32
@@ -416,8 +417,10 @@ class hm_device_info(Structure):
         ("firmware_major", c_uint8),
         ("firmware_minor", c_uint8),
         ("product_id", c_uint8),
+        # ⚠ The count is the 0x84 reply's LENGTH, not a byte in it; the bytes
+        # are per-sensor location codes (0 → 0.00 m, 1 → 0.10 m, 2 → 0.26 m).
         ("sensor_count", c_uint8),
-        ("sensor_map_undecoded", c_uint8),
+        ("sensor_location", c_uint8 * HM_SENSOR_LOCATION_MAX),
         ("battery_percent", c_uint8),
         ("status_undecoded", c_uint16),
         ("mac", c_char * HM_MAC_STRING_MAX),

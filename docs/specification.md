@@ -87,6 +87,7 @@ Byte sequences are written in hex without separators: `a0 01 7e`.
 | `a1` history command arguments | **big-endian** |
 | `0x80` version reply | sequence of independent `u8` pairs, no multi-byte integers |
 | `0x81` status bytes 1–2 | `u16be` |
+| `0x84` sensor map | independent `u8` location codes — and its **length** is the sensor count (§5.4) |
 | `0x85`, `0x86` replies | ASCII text, not integers |
 
 ---
@@ -169,8 +170,21 @@ device -> host:     <message-id u8> <payload...>
 ```
 
 There is **no length field, no sequence number and no checksum**. Payload length is implied by
-the message id. Most commands are a single byte; the `0xa0`, `0xa1` and `0xa2` families take
-arguments. A reply's first byte generally echoes the command that provoked it.
+the message id and by the notification boundary. Most commands are a single byte; the `0xa0`,
+`0xa1` and `0xa2` families take arguments. A reply's first byte generally echoes the command
+that provoked it.
+
+**⚠ For three messages the length itself carries meaning**, so it must be read rather than
+assumed: `0x84`'s length *is* the sensor count (§5.4), `0x90`'s decides how many records are
+present (§6.3), and `0x94`'s selects between two different payload formats (§8.2).
+
+With no checksum, **a structural check is the only validation available** — the quaternion norm
+(§6.4) and the requirement that a stream payload divide exactly into whole records.
+
+⚠ **A short frame will not announce itself.** A truncated block is dropped *silently* — the
+vendor application's own logs do not report one, so they cannot be used as a reference for
+whether a stream is arriving intact. **A client gets no truncation detection it does not write
+itself**, which is what the two structural checks above are for.
 
 ---
 
@@ -182,7 +196,7 @@ arguments. A reply's first byte generally echoes the command that provoked it.
 | `81` | `81` + 3 | Battery and status — §5.3 |
 | `82` | `82 01` | **Legacy start streaming.** No config argument; produces `0x7f` frames — §6.3.1. The app only sends it to protocol < 3 hardware, but this device accepts it |
 | `83` | `83 01` | **Stop streaming** — §6.1 |
-| `84` | `84` + 2 | Sensor map — §5.4 |
+| `84` | `84` + *n* | Sensor map, **one byte per sensor** — §5.4. Two on this device |
 | `85` | `85` + 12 | BLE MAC address, ASCII hex, no separators |
 | `86` | `86` + 9 | Serial number, ASCII |
 | `a0 01 <config>` | `a0 01` | **Start streaming** — §6.1 |
@@ -268,10 +282,33 @@ see §6.2 and §7.1.
 
 ### 5.4 `0x84` — sensor map
 
+**The reply is one byte per sensor, and every byte is a location code.**
+
 | Byte | Field |
 |---|---|
-| 0 | **Sensor count**, `02`. This is why every record carries two blocks |
-| 1 | Undecoded, observed `01` |
+| 0 | Location code of the first sensor, observed `02` |
+| 1 | Location code of the second sensor, observed `01` |
+
+**⚠ The sensor count is the reply's LENGTH, not a byte in it.** `84 02 01` means two sensors
+because it carries two payload bytes. The device under test replies with a leading `02` and has
+two sensors, so the two readings coincide here — **and that coincidence is the trap.** A client
+that reads byte 0 as a count is correct on this device and wrong on any device whose first
+sensor sits somewhere else. Take the count from the length.
+
+The count matters because it sizes a record: §6.3's record is a header followed by **one block
+per sensor**, so getting it wrong misplaces every field after the first block.
+
+**The location codes name a point on the limb**, as a distance from the joint:
+
+| Code | Offset | What sits there |
+|---|---|---|
+| `0` | 0.00 m | at the joint |
+| `1` | **0.10 m** | wrist-to-knuckles on an adult — **the palm unit** |
+| `2` | **0.26 m** | elbow-to-wrist on an adult — **the lower-arm unit** |
+
+So `02 01` reads as *lower arm first, palm second*, which is exactly the block order of a record
+(§6.3) — and it is one of the three independent routes that settle that order. No reading puts a
+0.26 m segment on a hand.
 
 ---
 
@@ -327,11 +364,9 @@ configuration-dependent and should not be assumed outside `7e`.
 
 ### 6.3 Frame and record layout
 
-A `0x90` notification carries one or two records — 47 or 93 bytes total.
-
 ```
-notification := 0x90 , record{1,2}
-record       := header[2] , block[22] , block[22]              // 46 bytes
+notification := 0x90 , record+
+record       := header[2] , block × sensor_count               // 46 bytes at 2 sensors
 block        := quaternion[8] , accel[6] , gyro[6] , ticks[2]  // 22 bytes
 quaternion   := i16be w , i16be x , i16be y , i16be z
 accel        := i16be x , i16be y , i16be z
@@ -340,14 +375,51 @@ ticks        := u16be
 header       := u16be sample counter
 ```
 
+**Every multi-byte field in a block is big-endian, without exception** — quaternion,
+accelerometer, gyroscope, tick counter and the record header alike. ⚠ That uniformity is a
+property of the *stream* and not of the protocol; §1's table is the whole rule.
+
+`sensor_count` comes from the `0x84` reply and is **2** on this hardware (§5.4). Records repeat
+until the payload is consumed, and the observed notification sizes follow from that:
+
+```
+47 bytes = 1 + (2 + 22 + 22)        one record
+93 bytes = 1 + (2 + 22 + 22) × 2    two records
+```
+
+**⚠ One or two records is what fits a 96-byte MTU, not a limit of the encoding.** Nothing in the
+format bounds records per notification. **Loop until the payload is consumed**; do not
+special-case the two observed sizes, and do not size a buffer on the assumption that they are
+the only ones. A payload that does not divide exactly into whole records is malformed (§6.4).
+
+#### ⚠ The header is read once per record and applies to every block in it
+
+The sample index belongs to the *record*, not to a block: one header, then every block. **This
+is the structural basis for treating the two blocks as simultaneous samples** rather than merely
+adjacent ones — they are the same sample of the same instant, taken by two units.
+
+⚠ It does not make their **tick counters** equal, and it does not settle §10.3's 0.92 ms
+inter-unit offset. The index says the blocks belong to one sample; the ticks are two independent
+MCU timers and disagree by an amount whose physical meaning is unresolved.
+
+#### Which block is which
+
 **The first block is the lower-arm unit; the second is the palm unit.** The two are one BLE
 peripheral joined by a cable, and the assignment is fixed by that wiring. A client that swaps
-them produces a plausible but mirrored wrist angle.
+them produces a plausible but mirrored wrist angle. **Three independent routes agree**:
 
-**There is a physical check.** Under rotation the palm unit sits at the larger radius, so it
-reads a consistently *higher* linear acceleration magnitude than the lower-arm unit — measured
-at 31–51 m/s² more across five golf swings (§6.4). If a client is ever unsure which block is
-which, rotate the forearm and compare: the block with the larger acceleration is the palm.
+| Route | What it shows |
+|---|---|
+| **The sensor map** (§5.4) | `02 01` assigns block 0 a 0.26 m lever arm and block 1 a 0.10 m one — elbow-to-wrist and wrist-to-knuckles. No reading puts a 0.26 m segment on a hand |
+| **The calibration result** (§8.2) | Its four pose quaternions are named per unit. Matched against both blocks with no prior assumption, the palm poses fit block 1 by margins of 7.0° and 8.2°, the arm poses fit block 0 by 3.8° and 2.5°. Both captured attempts agree on all four |
+| **Acceleration radius** | The palm sits at the larger radius under rotation and reads the higher magnitude. Across **30 swing captures**, block 1 is higher in **4,996 of 5,487 moving samples (91.1%)**, where *moving* means max(&#124;a₀&#124;, &#124;a₁&#124;) > 20 m/s² |
+
+**There is a field check**, and it is the third route used deliberately: rotate the forearm and
+compare acceleration magnitudes — the block with the larger acceleration is the palm.
+
+⚠ **It is a strong majority, not a per-sample rule.** 91.1% is not 100%, and the margin grows
+with the vigour of the motion, so compare *peaks over a genuine swing* rather than trusting one
+sample or a gentle wave. At rest, where both units read ≈0 (§6.4), it says nothing at all.
 
 #### 6.3.1 The `0x7f` variant — produced by the legacy `82` start
 
@@ -355,14 +427,17 @@ Starting with the bare `82` command (§4) yields message id `0x7f` instead of `0
 different and **more restricted** layout:
 
 ```
-notification := 0x7f , record                          // 43 bytes, one record
-record       := block[21] , block[21]                  // 42 bytes, NO header
-block        := quaternion[8] , accel[6] , gyro[6] , u8   // 21 bytes
+notification := 0x7f , record+
+record       := block × sensor_count                      // 42 bytes at 2 sensors, NO header
+block        := quaternion[8] , accel[6] , gyro[6] , u8   // 21 bytes, always
 ```
 
-**There is no record header and no tick counter.** Blocks start at offset 0. The trailing byte
-of each block read `00` in every frame of a 981-frame session; it is the "one extra byte per
-block" the parser reads for this id.
+**There is no record header and no tick counter.** Blocks start at offset 0.
+
+⚠ **The 21-byte block is fixed for this message id**, and in particular it does *not* follow
+configuration bit 5 the way a `0x90` block does (§6.2). Where a `0x90` block carries a two-byte
+tick counter, a `0x7f` block carries **one unsigned byte**, which read `00` in every frame of a
+981-frame session. So the timestamp feature flag sizes a `0x90` block and has no effect here.
 
 ⚠ **This format carries no device clock whatsoever.** Consequences:
 
@@ -412,7 +487,14 @@ assume the range is generous. ⚠ Under a configuration with bit 6 clear the gyr
 ±2048 °/s, at which point both motions above clip.
 
 Quaternions are normalised on the wire: `|q| = 16384.7 ± 0.41` measured over 6,064 records.
-That norm is the cheapest structural check that a frame has been located correctly.
+That norm is the cheapest structural check that a frame has been located correctly. Compute it
+on the **raw `i16` values**, before any scaling.
+
+**⚠ Prefer normalising to dividing by 16384.** Q14 describes the encoding correctly, and on the
+stream the two agree to about 4 × 10⁻⁵ — but normalising is insensitive to firmware-dependent
+precision variation, and §8.2 documents a payload where the difference is decisive. Whichever a
+client picks, the norm must be **reported and not enforced**: a decoder that range-checks after
+scaling and rejects what falls outside will reject real device output.
 
 Axis order within each triplet is the sensor's own frame. **The gyroscope shares the
 quaternion's frame exactly** — identity axis map, cross-coupling below 0.25%.
@@ -922,8 +1004,8 @@ padding, no reordering: slot order is byte order.
 So the payload is **the complete calibration state the device computed, followed by the two
 poses it computed that state from**: one mount quaternion and one rotation-about-z per unit,
 which is exactly the per-unit state model the device maintains, and then the four pose readings.
-The field names are the vendor's own, translated into this document's palm / lower-arm
-vocabulary.
+Each of the eight is a named field, and the names map one-to-one onto this document's palm /
+lower-arm vocabulary; they are given descriptively above.
 
 The two pose columns carry one figure each from two captures: a library bench capture with a
 full ~30° raise, and the app-driven `07-calibration`, whose raise was barely 4° — too small for
@@ -1395,6 +1477,11 @@ more taps do not help.
 Treat the offset as stable and calibratable but of unknown physical meaning, and
 budget ~0.9° of relative-angle error at swing rates.
 
+⚠ **And it is a session-median figure, not a per-record one.** Single-record tick differences
+vary widely — the ±½-sample pairing jitter above dominates them — so a client must **not** read
+the difference between one record's two tick counters as a skew measurement. Two consecutive
+records of one capture read 89 and 99 ticks apart while the session median is 59.
+
 `5e` (config bit 5 clear) **removes the tick counter entirely** (§6.3), losing both the fine
 clock and any skew measurement. Prefer `7e` for anything timing-sensitive.
 
@@ -1437,12 +1524,16 @@ while a retrieval is in flight either**, mid-stream or not, for as long as the r
 (§7.5). The device cannot record and replay at the same time, which is the one limit that shapes
 the capture cycle in §7.6.
 
-**Undecoded fields.** Three small ones, none of which a client needs: two bytes of the
-battery/status reply that drift slowly and are not millivolts (§5.3); the second byte of the
-sensor-map reply (§5.4); and two bits of the stream configuration byte, which the vendor app
-always sets (§6.2). **The calibration result is no longer among them** — all eight of its
-quaternions are identified (§8.2) — but the **status byte on its short form** is: no value of it
-has ever been captured, and the form itself has never been seen on the wire.
+**Undecoded fields.** Two small ones, neither of which a client needs: two bytes of the
+battery/status reply that drift slowly and are not millivolts (§5.3), and two bits of the stream
+configuration byte, which the vendor app always sets (§6.2). Two entries have left this list:
+**the calibration result**, all eight of whose quaternions are identified (§8.2), and **the
+second sensor-map byte**, which is the second sensor's location code and was never a spare byte
+(§5.4). What remains from the calibration result is the **status byte on its short form**: no
+value of it has ever been captured, and the form itself has never been seen on the wire.
+
+**The `0x90` stream frame is now fully accounted for.** Every byte of every block is identified,
+and the record's own length rule explains the rest (§6.3, §6.4).
 
 **Unobserved behaviour.** Whatever makes the live sample rate change (§6.6). The legacy frame
 layout has likewise never appeared outside a deliberate legacy start.

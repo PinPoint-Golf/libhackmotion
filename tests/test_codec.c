@@ -353,14 +353,63 @@ HM_TEST(codec_decodes_status)
     HM_ASSERT_EQ(d.u.status.undecoded, 2226);
 }
 
-/* §5.4 — sensor count 2 is why every record carries two blocks. */
+/*
+ * §5.4 — the sensor count is the reply's LENGTH, not a byte in it, and the
+ * bytes are per-sensor location codes.  ⚠ `84 02 01` gives 2 either way on this
+ * device, which is precisely why the wrong reading looks right here: the test
+ * pins the rule on a reply where the two answers DIFFER.
+ */
 HM_TEST(codec_decodes_sensor_map)
 {
     hm_decoded d;
+
     HM_ASSERT_EQ(hm_codec_decode(HM_FIX_SENSOR_MAP, sizeof(HM_FIX_SENSOR_MAP),
                                  hm_stream_config_default(), &d),
                  HM_OK);
-    HM_ASSERT_EQ(d.u.sensor_map.sensor_count, 2);
+    HM_ASSERT_EQ(d.kind, HM_MSGK_SENSOR_MAP);
+    HM_ASSERT_EQ(d.u.sensor_map.count, 2);
+    /* `02 01`: 0.26 m then 0.10 m — the lower arm first, as the blocks are. */
+    HM_ASSERT_EQ(d.u.sensor_map.location[0], 0x02);
+    HM_ASSERT_EQ(d.u.sensor_map.location[1], 0x01);
+    HM_ASSERT_EQ(d.consumed, 3);
+
+    /* ⚠ THE CASE THAT SEPARATES THE TWO READINGS.  Two payload bytes whose
+     * first is 1, not 2: still two sensors.  Reading byte 0 would say one. */
+    {
+        const uint8_t two_at_the_wrist[3] = {0x84, 0x01, 0x01};
+        HM_ASSERT_EQ(hm_codec_decode(two_at_the_wrist, sizeof(two_at_the_wrist),
+                                     hm_stream_config_default(), &d),
+                     HM_OK);
+        HM_ASSERT_EQ(d.u.sensor_map.count, 2);
+    }
+
+    /* One sensor, and one byte says so — the count follows the length up and
+     * down, so a single-sensor map is not mistaken for this device's two. */
+    {
+        const uint8_t one[2] = {0x84, 0x02};
+        HM_ASSERT_EQ(hm_codec_decode(one, sizeof(one), hm_stream_config_default(), &d), HM_OK);
+        HM_ASSERT_EQ(d.u.sensor_map.count, 1);
+        HM_ASSERT_EQ(d.u.sensor_map.location[0], 0x02);
+        HM_ASSERT_EQ(d.consumed, 2);
+    }
+
+    /* More sensors than this library keeps codes for: `count` tells the truth
+     * even where `location` has run out, which is the whole point of two
+     * numbers rather than one. */
+    {
+        const uint8_t many[7] = {0x84, 0x02, 0x01, 0x00, 0x01, 0x02, 0x00};
+        HM_ASSERT_EQ(hm_codec_decode(many, sizeof(many), hm_stream_config_default(), &d), HM_OK);
+        HM_ASSERT_EQ(d.u.sensor_map.count, 6);
+        HM_ASSERT_EQ(d.u.sensor_map.location[HM_SENSOR_LOCATION_MAX - 1], 0x01);
+        HM_ASSERT_EQ(d.consumed, 7);
+    }
+
+    /* No payload byte is no sensor, which no device can be. */
+    {
+        const uint8_t bare[1] = {0x84};
+        HM_ASSERT_EQ(hm_codec_decode(bare, sizeof(bare), hm_stream_config_default(), &d),
+                     HM_ERR_TRUNCATED);
+    }
 }
 
 /* §4 — the MAC arrives as 12 ASCII hex characters with no separators. */

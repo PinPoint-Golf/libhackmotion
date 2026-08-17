@@ -102,7 +102,7 @@ static const abi_field f_device_info[] = {
     F(hm_device_info, firmware_minor),
     F(hm_device_info, product_id),
     F(hm_device_info, sensor_count),
-    F(hm_device_info, sensor_map_undecoded),
+    F(hm_device_info, sensor_location),
     F(hm_device_info, battery_percent),
     F(hm_device_info, status_undecoded),
     F(hm_device_info, mac),

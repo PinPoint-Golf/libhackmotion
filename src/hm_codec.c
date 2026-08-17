@@ -145,7 +145,6 @@ static int fixed_payload_length(uint8_t id)
         case HM_MSG_ID_STATUS:         return 3;
         case HM_MSG_ID_STREAM_STARTED: return 1;
         case HM_MSG_ID_STREAM_STOPPED: return 1;
-        case HM_MSG_ID_SENSOR_MAP:     return 2;
         case HM_MSG_ID_MAC:            return 12;
         case HM_MSG_ID_SERIAL:         return 9;
         case HM_MSG_ID_START_ACK:      return 1;
@@ -243,6 +242,38 @@ static hm_status decode_frame(const uint8_t *data, size_t length, const hm_strea
      */
     out->u.frame.count_present = present;
     out->consumed = 1u + present * record;
+    return HM_OK;
+}
+
+/*
+ * 0x84 — the sensor map.  ⚠ THE SENSOR COUNT IS THE REPLY'S LENGTH, NOT A BYTE
+ * IN IT (§5.4), which is why this is length-driven rather than a fixed two.
+ *
+ * `84 02 01` carries two payload bytes, so two sensors.  The leading `02` is
+ * the first sensor's LOCATION CODE — 0.26 m from the joint, the lower arm — and
+ * it equals the sensor count on this device by pure coincidence.  A parser that
+ * reads byte 0 as the count is correct here and wrong on any device whose first
+ * sensor sits somewhere else.
+ *
+ * Zero payload bytes would be zero sensors, which no device can be; it is
+ * TRUNCATED rather than a valid empty map.
+ */
+static hm_status decode_sensor_map(const uint8_t *data, size_t length, hm_decoded *out)
+{
+    size_t n = length - 1u;
+    size_t i;
+
+    if (n == 0u) {
+        return HM_ERR_TRUNCATED;
+    }
+    out->kind = HM_MSGK_SENSOR_MAP;
+    out->u.sensor_map.count = (uint8_t)((n > 255u) ? 255u : n);
+    for (i = 0; i < n && i < HM_SENSOR_LOCATION_MAX; ++i) {
+        out->u.sensor_map.location[i] = data[1 + i];
+    }
+    /* Every payload byte is a location code, so the whole notification is
+     * accounted for however many there are — no trailing-bytes case exists. */
+    out->consumed = length;
     return HM_OK;
 }
 
@@ -345,7 +376,11 @@ hm_status hm_codec_decode(const uint8_t *data, size_t length, hm_stream_config c
         return st;
     }
 
-    /* --- The calibration result, which is length-discriminated ---------- */
+    /* --- The two messages whose LENGTH carries meaning ------------------- */
+    if (id == HM_MSG_ID_SENSOR_MAP) {
+        return decode_sensor_map(data, length, out);
+    }
+
     if (id == HM_MSG_ID_CALIBRATION) {
         return decode_calibration(data, length, out);
     }
@@ -394,12 +429,6 @@ hm_status hm_codec_decode(const uint8_t *data, size_t length, hm_stream_config c
 
         case HM_MSG_ID_STREAM_STOPPED:
             out->kind = HM_MSGK_STREAM_STOPPED;
-            break;
-
-        case HM_MSG_ID_SENSOR_MAP:
-            out->kind = HM_MSGK_SENSOR_MAP;
-            out->u.sensor_map.sensor_count = data[1];
-            out->u.sensor_map.undecoded = data[2];
             break;
 
         case HM_MSG_ID_MAC:

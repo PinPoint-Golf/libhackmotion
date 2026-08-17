@@ -16,6 +16,7 @@
 
 #include "hackmotion/types.h"
 #include "hackmotion/config.h"
+#include "hackmotion/device.h"
 #include "hackmotion/sample.h"
 
 /* Message ids the device can send.  Spec §5.1. */
@@ -63,9 +64,12 @@ typedef enum hm_msg_kind {
 } hm_msg_kind;
 
 /*
- * §6.3 says a notification carries one or two records.  The array is larger so
- * that a firmware sending more is DECODED and reported rather than silently
- * truncated; anything above two raises HM_WARN_UNEXPECTED_RECORD_COUNT.
+ * ⚠ THE ENCODING SETS NO UPPER BOUND ON RECORDS PER NOTIFICATION (§6.3).  One
+ * or two is what fits a 96-byte MTU, not a limit of the format, so the decoder
+ * LOOPS until the payload is consumed and never special-cases the two observed
+ * sizes.  The array is larger than two so that a notification carrying more is
+ * DECODED and reported rather than silently truncated; above two it raises
+ * HM_WARN_UNEXPECTED_RECORD_COUNT, which says "never observed", not "illegal".
  *
  * ⚠ A FIXED ARRAY CANNOT KEEP THAT PROMISE ABOVE ITS OWN SIZE, and pretending
  * otherwise is how a truncation becomes silent (implementation-review I13).  So
@@ -102,8 +106,19 @@ typedef struct hm_decoded {
             uint16_t undecoded;
         } status;
         struct {
-            uint8_t sensor_count;
-            uint8_t undecoded;
+            /*
+             * ⚠ THE COUNT IS THE REPLY'S LENGTH, NOT A BYTE IN IT (§5.4).
+             * `84 02 01` is two sensors because it has two payload bytes; the
+             * leading 2 is the first sensor's LOCATION CODE and coincides with
+             * the count on this device by accident.  Reading byte 0 as a count
+             * is right here and wrong in general.
+             *
+             * `count` is what the reply says; `location` holds the first
+             * HM_SENSOR_LOCATION_MAX codes.  They differ only above that, and
+             * a consumer that compares them sees that they did.
+             */
+            uint8_t count;
+            uint8_t location[HM_SENSOR_LOCATION_MAX];
         } sensor_map;
         struct {
             char text[20];           /* MAC (colon-formatted) or serial, NUL-terminated */

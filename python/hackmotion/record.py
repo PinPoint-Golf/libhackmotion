@@ -9,7 +9,7 @@ deliberately kept independent.  Anything written through *this* module goes
 through `record/hm_record.c`, so there is no second format to keep in step.
 
 ⚠ RECORD THE WIRE BYTES, NOT THE DECODED SAMPLES.  Undecoded fields remain — two
-bytes of the battery reply, the second sensor-map byte, two configuration bits,
+bytes of the battery reply, two configuration bits,
 the status byte on the short-form calibration result — and the calibration
 payload is understood but decoded by nothing here.  When one is settled a
 byte-level recording can be

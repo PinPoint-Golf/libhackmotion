@@ -1945,12 +1945,17 @@ static void derive_from_frame(hm_session *s, hm_sample *sample)
         }
 
         /*
-         * ⚠ palm − lower_arm.  §10.3 measures a stable 59 ticks (0.92 ms) whose
-         * physical meaning is unresolved and CANNOT be settled by a shared
-         * impulse — a tap is shorter than the 1.25 ms sample period.  It is
-         * carried explicitly rather than silently pairing the two blocks as
-         * simultaneous: at 1,000 °/s it is worth ~0.9° in the relative angle,
-         * which is the primary output.
+         * ⚠ palm − lower_arm, for THIS record.  §10.3 measures a stable 59
+         * ticks (0.92 ms) whose physical meaning is unresolved and CANNOT be
+         * settled by a shared impulse — a tap is shorter than the 1.25 ms
+         * sample period.  It is carried explicitly rather than silently pairing
+         * the two blocks as simultaneous: at 1,000 °/s it is worth ~0.9° in the
+         * relative angle, which is the primary output.
+         *
+         * ⚠ ONE RECORD'S VALUE IS NOT THE SKEW — pairing jitter dominates it,
+         * and 59 is a session median, not a per-record constant.  The raw
+         * measurement is what travels; aggregating it is the consumer's, and
+         * hm_sample.skew_us says so.
          */
         if (sample->lower_arm.has_ticks && sample->palm.has_ticks) {
             int32_t skew_ticks = hm_tick_skew(sample->palm.ticks_raw, sample->lower_arm.ticks_raw);
@@ -3620,9 +3625,26 @@ static void on_message(hm_session *s, hm_decoded *dec, hm_time_us host_recv_us)
         }
 
         case HM_MSGK_SENSOR_MAP:
-            s->info.sensor_count = dec->u.sensor_map.sensor_count;
-            s->info.sensor_map_undecoded = dec->u.sensor_map.undecoded;
+            s->info.sensor_count = dec->u.sensor_map.count;
+            memcpy(s->info.sensor_location, dec->u.sensor_map.location,
+                   sizeof(s->info.sensor_location));
             s->info.valid |= (uint32_t)HM_INFO_SENSOR_MAP;
+            /*
+             * ⚠ THE RECORD LAYOUT THIS LIBRARY DECODES HAS EXACTLY TWO BLOCKS.
+             * §6.3's record is a header followed by one block PER SENSOR, so a
+             * device reporting anything but two has a record size this library
+             * computes wrongly — and every field after the first block would be
+             * read at the wrong offset.
+             *
+             * It is reported here rather than left to the quaternion norm check
+             * downstream.  The norm WOULD catch it (§6.4), but it would report
+             * a misaligned frame every record without ever saying why, and the
+             * cause is knowable the moment the map arrives.
+             */
+            if (dec->u.sensor_map.count != 2u) {
+                warn_now(s, HM_WARN_SENSOR_COUNT_UNSUPPORTED,
+                         (int32_t)dec->u.sensor_map.count, 0.0);
+            }
             maybe_enter_ready(s);
             break;
 

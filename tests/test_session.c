@@ -555,7 +555,12 @@ HM_TEST(bringup_runs_the_nine_one_sequence_and_reaches_ready)
         HM_ASSERT_EQ(info.protocol_major, 4);
         HM_ASSERT_EQ(info.firmware_minor, 8);
         HM_ASSERT_EQ(info.product_id, 0x14);
+        /* ⚠ Two sensors because the reply carries two BYTES, not because its
+         * first byte reads 2 (§5.4).  The bytes are location codes: 0.26 m then
+         * 0.10 m, the lower arm first, matching the block order of a record. */
         HM_ASSERT_EQ(info.sensor_count, 2);
+        HM_ASSERT_EQ(info.sensor_location[0], 0x02);
+        HM_ASSERT_EQ(info.sensor_location[1], 0x01);
         HM_ASSERT_EQ(info.battery_percent, 100);
         HM_ASSERT_EQ(info.status_undecoded, 2226); /* ⚠ NOT millivolts */
         HM_ASSERT_STR(info.mac, "A1:B2:C3:D4:E5:F6");
@@ -565,6 +570,62 @@ HM_TEST(bringup_runs_the_nine_one_sequence_and_reaches_ready)
     }
     /* Two `81` polls in the sequence produce two battery events. */
     HM_ASSERT_EQ(count_events(f, HM_EV_BATTERY), 2u);
+    fake_close(f);
+}
+
+/*
+ * ⚠ §5.4/§6.3.  A record is a header followed by one block PER SENSOR, so the
+ * sensor count sizes the record.  Every layout this library decodes has exactly
+ * two blocks, so a map reporting anything else means the stream is about to be
+ * read at the wrong offsets from the second block on.
+ *
+ * Reported when the MAP arrives, not when the frames start going wrong. The
+ * quaternion norm would catch the misalignment (§6.4), but it would fire once
+ * per record and never name the cause, and the cause is knowable here.
+ */
+HM_TEST(a_sensor_count_the_record_layout_cannot_carry_is_reported_at_the_map)
+{
+    fake         *f = fake_open(NULL);
+    /* Three payload bytes: three sensors, whatever the individual codes say. */
+    const uint8_t three_sensors[4] = { 0x84, 0x02, 0x01, 0x00 };
+
+    hm_session_on_link_up(f->s, 247, f->now);
+    drain(f);
+    feed(f, k_versions, sizeof(k_versions));
+    feed(f, k_status, sizeof(k_status));
+    feed(f, three_sensors, sizeof(three_sensors));
+
+    HM_ASSERT_EQ(count_warnings(f, HM_WARN_SENSOR_COUNT_UNSUPPORTED), 1u);
+    {
+        size_t i;
+        for (i = 0; i < f->nevents; ++i) {
+            if (f->events[i].type == (uint16_t)HM_EV_WARNING &&
+                f->events[i].u.warning.code == (uint16_t)HM_WARN_SENSOR_COUNT_UNSUPPORTED) {
+                HM_ASSERT_EQ(f->events[i].u.warning.detail_i32, 3);
+            }
+        }
+    }
+
+    /* ⚠ Reported, not refused.  The map is still recorded — a count this
+     * library cannot decode is exactly the thing a capture should preserve, and
+     * the location codes are what would identify the extra unit. */
+    {
+        hm_device_info info;
+        HM_ASSERT_EQ(hm_session_device_info(f->s, &info), HM_OK);
+        HM_ASSERT_EQ(info.sensor_count, 3);
+        HM_ASSERT_EQ(info.sensor_location[2], 0x00);
+        HM_ASSERT(info.valid & (uint32_t)HM_INFO_SENSOR_MAP);
+    }
+    fake_close(f);
+}
+
+/* The device under test says two, and says it without a warning. */
+HM_TEST(the_two_sensor_map_this_device_sends_is_not_warned_about)
+{
+    fake *f = fake_open(NULL);
+
+    bring_up(f);
+    HM_ASSERT_EQ(count_warnings(f, HM_WARN_SENSOR_COUNT_UNSUPPORTED), 0u);
     fake_close(f);
 }
 

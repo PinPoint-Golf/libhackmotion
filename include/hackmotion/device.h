@@ -110,6 +110,14 @@ HM_API bool hm_looks_like_hackmotion(const char *local_name,
 #define HM_SERIAL_MAX         16
 #define HM_MAC_STRING_MAX     18
 
+/*
+ * How many 0x84 location codes are kept.  Four rather than two so a device
+ * reporting more than this library decodes is RECORDED rather than truncated
+ * to the two blocks it happens to expect — the same two-number contract the
+ * record decoder uses (hm_codec.h).
+ */
+#define HM_SENSOR_LOCATION_MAX 4
+
 typedef struct hm_device_info {
     /* From 0x80 (spec §5.2).  `valid` bits say which replies have arrived. */
     uint8_t hardware_major, hardware_minor;
@@ -117,9 +125,25 @@ typedef struct hm_device_info {
     uint8_t firmware_major, firmware_minor;   /* the vendor calls this "embedded version" */
     uint8_t product_id;                       /* 0x14 == 20 on the device under test */
 
-    /* From 0x84 (spec §5.4). */
-    uint8_t sensor_count;                     /* 2 — why every record carries two blocks */
-    uint8_t sensor_map_undecoded;             /* observed 0x01 */
+    /*
+     * From 0x84 (spec §5.4).
+     *
+     * ⚠ THE COUNT IS THE REPLY'S LENGTH, NOT A BYTE IN IT.  `84 02 01` means
+     * two sensors because it carries two payload bytes — not because the first
+     * one reads 2.  On this device the two happen to coincide, which is exactly
+     * why reading byte 0 as a count looks correct here and is wrong in general.
+     *
+     * The payload bytes are LOCATION CODES, one per sensor, each naming a point
+     * on the limb: 0 → 0.00 m, 1 → 0.10 m, 2 → 0.26 m from the joint.  Those are
+     * limb-segment lengths — elbow-to-wrist is ~0.26 m on an adult and
+     * wrist-to-knuckles ~0.10 m — and `02 01` is therefore the lower arm first
+     * and the palm second, matching the block order of every record (§6.3).
+     *
+     * At most HM_SENSOR_LOCATION_MAX codes are kept.  ⚠ `sensor_count` is what
+     * the reply SAYS and may exceed that; compare the two before indexing.
+     */
+    uint8_t sensor_count;
+    uint8_t sensor_location[HM_SENSOR_LOCATION_MAX];
 
     /* From 0x81 (spec §5.3). */
     uint8_t  battery_percent;
