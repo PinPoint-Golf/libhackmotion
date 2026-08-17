@@ -36,21 +36,31 @@
     },
     {
       "name": "rel",
-      "displayName": "Release",
+      "displayName": "RelWithDebInfo — optimised, KEEPS debug info",
+      "description": "-O2 -g -DNDEBUG. The one to build when a release-mode fault needs a symbolised stack: it carries full DWARF, so it is larger than the Debug build rather than smaller. Not the artefact to ship — that is `release`.",
       "binaryDir": "${sourceDir}/build/rel",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "release",
+      "displayName": "Release — optimised, NO debug info",
+      "description": "-O3 -DNDEBUG and no -g: the shipping artefact. Measured against `rel` on the same source, libhackmotion.a is 110 KB rather than 342 KB, and dwarfdump reports zero compile units rather than 15. Distinct from `rel` on purpose — `rel` is for debugging an optimised build, this is for shipping one, and one preset cannot be both.",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     }
   ],
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev", "jobs": 4 },
     { "name": "san", "configurePreset": "san", "jobs": 4 },
     { "name": "cov", "configurePreset": "cov", "jobs": 4 },
-    { "name": "rel", "configurePreset": "rel", "jobs": 4 }
+    { "name": "rel", "configurePreset": "rel", "jobs": 4 },
+    { "name": "release", "configurePreset": "release", "jobs": 4 }
   ],
   "testPresets": [
     { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
     { "name": "san", "configurePreset": "san", "output": { "outputOnFailure": true } },
     { "name": "cov", "configurePreset": "cov", "output": { "outputOnFailure": true } },
-    { "name": "rel", "configurePreset": "rel", "output": { "outputOnFailure": true } }
+    { "name": "rel", "configurePreset": "rel", "output": { "outputOnFailure": true } },
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } }
   ]
 }

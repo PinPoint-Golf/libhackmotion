@@ -24,7 +24,10 @@ cmake --build build/dev -j4
 ctest --test-dir build/dev --output-on-failure
 ```
 
-Presets `dev`, `san`, `cov` and `rel` wrap the usual configurations.
+Presets `dev`, `san`, `cov`, `rel` and `release` wrap the usual configurations.
+The last two are both optimised and differ only in debug info: `rel` is
+`RelWithDebInfo`, for symbolising a fault in an optimised build, and `release` is
+`-O3` with none, for shipping — 110 KB against 342 KB.
 
 ### Embedding
 
