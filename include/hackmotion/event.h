@@ -523,6 +523,27 @@ typedef enum hm_warning_code {
      * would fire on every record without ever naming the cause.
      */
     HM_WARN_SENSOR_COUNT_UNSUPPORTED,
+    /*
+     * ⚠ The device reports a product id other than HM_PRODUCT_ID_MEASURED — it
+     * is not the hardware the specification was measured on.  `detail_i32`
+     * carries the reported id.
+     *
+     * NOT an error, and NOT a refusal.  The protocol may well be identical;
+     * "wG3" names a generation and later generations are expected.  What the
+     * warning says is narrower and worth saying: every constant this library
+     * carries — the ≈799.2 Hz sample rate, the tick rate, the ~7.5 s history
+     * depth, the field scales, the meaning of each configuration bit — was
+     * established on one product, and none of it has been checked here.
+     *
+     * It fires once, on the version reply, and lands in the wire log's
+     * provenance so a capture says which hardware produced it instead of being
+     * re-read years later under constants that never applied to it.
+     *
+     * ⚠ Feature gating does NOT use this.  The protocol version in the same
+     * reply is what says which commands exist (§6.2, §7.1); that is generation-
+     * independent and needs no product allowlist.
+     */
+    HM_WARN_UNVERIFIED_PRODUCT,
     HM_WARN_CODE_COUNT
 } hm_warning_code;
 

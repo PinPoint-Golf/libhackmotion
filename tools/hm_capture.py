@@ -62,7 +62,12 @@ except ImportError as _exc:  # the module stays importable without a radio stack
     _BLEAK_ERROR = _exc
 
 # --- spec §2.1, §2.3 --------------------------------------------------------
-DEVICE_NAME = "HackMotion wG3"
+# ⚠ THE WRIST FAMILY, NOT ONE GENERATION.  "wG3" is wrist, generation 3, so a
+# later sensor advertises a different name; matching the prefix keeps a capture
+# tool able to record the very hardware nobody has characterised yet, which is
+# exactly when a capture is worth most.  The library's own filter is
+# hm_looks_like_hackmotion() and agrees.
+DEVICE_NAME_PREFIX = "HackMotion w"
 DATA_CHAR = "413c3893-b7e8-4231-9673-7af7aed06ddc"
 
 # spec §2.4: the calibration result is 65 bytes and stream notifications reach
@@ -509,7 +514,7 @@ async def find_device(args) -> str:
 
     def seen(device, adv):
         name = adv.local_name or device.name or ""
-        if DEVICE_NAME in name and not found.done():
+        if name.startswith(DEVICE_NAME_PREFIX) and not found.done():
             found.set_result(device.address)
 
     kwargs = {"adapter": args.adapter} if args.adapter else {}
@@ -522,7 +527,7 @@ async def find_device(args) -> str:
             return await asyncio.wait_for(found, timeout=args.scan)
         except asyncio.TimeoutError:
             raise SystemExit(
-                f"hm_capture: no '{DEVICE_NAME}' in {args.scan:.0f} s.\n"
+                f"hm_capture: no '{DEVICE_NAME_PREFIX}*' in {args.scan:.0f} s.\n"
                 "  The device advertises only for a few seconds after a button press,\n"
                 "  and the vendor app will win the race if it is running (§2.2)."
             )

@@ -3,7 +3,7 @@
 # HackMotion Sensor — BLE Protocol Specification
 
 Implementation-facing description of the protocol spoken by a **HackMotion wG3** (hardware
-4.1, firmware 4.8, protocol 4.0). Written to be implemented from directly.
+4.1, firmware 4.8, protocol 4.0, product id `0x14`). Written to be implemented from directly.
 
 **This document states what the protocol *is*.** It carries no history, no dates and no
 account of how anything was found. It is complete in itself — everything needed to write a
@@ -28,6 +28,28 @@ has never been sent and must not be. `fa`, power off, **has** been sent and beha
 **One device.** Every measurement here comes from a single unit. Anything that could plausibly
 vary between units — the crystal rate above all (§6.5, §10) — is flagged where it arises, and a
 client should measure such values per device rather than inherit the constants quoted here.
+
+**⚠ And one *generation*, which is the wider caveat.** The name decomposes: **`w` is wrist and
+`G3` is generation 3**, so this document describes the third generation of a wrist sensor and
+later ones exist. Everything measured here is scoped to that generation — the ≈799.2 Hz internal
+rate, the tick rate, the ~7.5 s history depth, the field scales, the sensor count, and what each
+configuration bit means. **None of it has been checked on any other generation**, and a figure
+being quoted here is not evidence that it holds on the next one.
+
+Two things follow, and they pull in opposite directions on purpose:
+
+- **Do not hardcode the generation into discovery.** The generation is part of the advertised
+  local name (§2.1), so an exact-name filter makes a newer sensor undiscoverable — on precisely
+  those stacks that report no service UUIDs and leave the name as the only evidence. Match the
+  family.
+- **Do not assume the constants carry over.** Re-measure against a new generation before quoting
+  any figure from this document at it. The `0x80` reply carries a **product id** (§5.2) which is
+  the wire-visible discriminator, and a client that records it can tell later which hardware a
+  capture came from.
+
+**What *does* generalise is the protocol version**, also in the `0x80` reply. It is what the
+vendor's own application gates features on (§6.2, §7.1), and it is the mechanism designed for
+this — capability is asked for by version, not inferred from a model name.
 
 ---
 
@@ -99,6 +121,18 @@ Byte sequences are written in hex without separators: `a0 01 7e`.
 The sensor advertises the local name **`HackMotion wG3`** for only a few seconds following a
 physical button press, then stops. A scanner must already be running when the button is
 pressed.
+
+**⚠ Match the family, not that string.** `wG3` is *wrist, generation 3* — the generation is
+part of the advertised name, so a later sensor advertises a different one. **Match the prefix
+`HackMotion w`**, and treat the trailing generation as information to show the user rather than
+as a filter. An exact-name match fails in the worst available way: many stacks report no service
+UUIDs in an advertisement at all, leaving the name as the only evidence, so a newer sensor
+becomes simply invisible on first run and reads as a broken client rather than as unsupported
+hardware.
+
+⚠ **Being found is not being supported.** The prefix decides what a user is *offered*; whether
+a client can speak to it is settled afterwards by the MTU floor (§2.4) and the version reply
+(§5.2), whose product id says whether this is the hardware anything here was measured on.
 
 **Discovery is a race.** A conventional scan-then-pick-from-a-list flow assumes the device is
 discoverable whenever you go looking; here it is not. Arm the scanner *first*, then prompt the
@@ -271,7 +305,15 @@ Seven bytes, three `u8` pairs and a scalar.
 | 6 | Product id | `14` → 20 |
 
 The vendor calls firmware "embedded version". **Protocol version drives feature gating** —
-see §6.2 and §7.1.
+see §6.2 and §7.1. It is also the field that generalises across generations: capability is
+asked for by version, never inferred from a model name.
+
+**The product id is the wire-visible generation discriminator.** Everything in this document
+was measured at `0x14`; a device reporting anything else is a different product and none of
+these constants have been checked against it. That is not a reason to refuse it — the protocol
+may well be identical — but it is a reason to **record the id alongside any capture**, so a
+recording can say which hardware produced it rather than being re-read later under constants
+that never applied to it.
 
 ### 5.3 `0x81` — battery and status
 

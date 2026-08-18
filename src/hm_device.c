@@ -106,8 +106,16 @@ bool hm_looks_like_hackmotion(const char *local_name, const hm_uuid *advertised_
      * us: plenty of platforms report no service UUIDs in an advertisement at
      * all.  A service match without the name is accepted too, since a device
      * whose name field was truncated is still worth offering to the user.
+     *
+     * ⚠ THE PREFIX, NOT THE WHOLE NAME.  "wG3" names a generation, so a later
+     * sensor advertises a different string and an exact match would hide it on
+     * exactly those stacks that give us nothing else to go on.  The family
+     * prefix keeps every generation discoverable; whether one can be SPOKEN to
+     * is settled after link-up, by the MTU floor and by the version reply.
      */
-    if (local_name != NULL && strcmp(local_name, HM_ADVERTISED_LOCAL_NAME) == 0) {
+    if (local_name != NULL &&
+        strncmp(local_name, HM_ADVERTISED_NAME_PREFIX, sizeof(HM_ADVERTISED_NAME_PREFIX) - 1u) ==
+            0) {
         return true;
     }
     if (advertised_services != NULL) {

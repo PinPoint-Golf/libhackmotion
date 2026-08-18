@@ -619,6 +619,66 @@ HM_TEST(a_sensor_count_the_record_layout_cannot_carry_is_reported_at_the_map)
     fake_close(f);
 }
 
+/*
+ * ⚠ "wG3" is wrist, GENERATION 3, so later generations are expected and the
+ * library must not pretend one it has never seen is the one every constant was
+ * measured on.  A different product id is neither an error nor a refusal — the
+ * protocol may be identical — but the ≈799.2 Hz sample rate, the tick rate,
+ * the history depth, the field scales and the meaning of every configuration
+ * bit came from ONE product and are unverified anywhere else.
+ *
+ * Reported once, at the version reply, so a capture says which hardware made
+ * it rather than being re-read later under constants that never applied.
+ */
+HM_TEST(a_product_the_specification_was_not_measured_on_is_reported_not_refused)
+{
+    fake *f = fake_open(NULL);
+    /* Same protocol 4.0, same shape of reply — only the product id differs. */
+    uint8_t next_generation[sizeof(k_versions)];
+
+    memcpy(next_generation, k_versions, sizeof(next_generation));
+    next_generation[7] = 0x15; /* not HM_PRODUCT_ID_MEASURED */
+
+    hm_session_on_link_up(f->s, 247, f->now);
+    drain(f);
+    feed(f, next_generation, sizeof(next_generation));
+
+    HM_ASSERT_EQ(count_warnings(f, HM_WARN_UNVERIFIED_PRODUCT), 1u);
+    {
+        size_t i;
+        for (i = 0; i < f->nevents; ++i) {
+            if (f->events[i].type == (uint16_t)HM_EV_WARNING &&
+                f->events[i].u.warning.code == (uint16_t)HM_WARN_UNVERIFIED_PRODUCT) {
+                HM_ASSERT_EQ(f->events[i].u.warning.detail_i32, 0x15);
+            }
+        }
+    }
+
+    /* ⚠ REPORTED, NOT REFUSED.  Bring-up carries on and the session is not
+     * failed: the library has no evidence the protocol differs, and refusing
+     * hardware on the strength of a version byte would be a guess in the one
+     * direction that cannot be recovered from. */
+    HM_ASSERT_EQ(count_events(f, HM_EV_LINK_DOWN), 0u);
+    {
+        hm_device_info info;
+        HM_ASSERT_EQ(hm_session_device_info(f->s, &info), HM_OK);
+        HM_ASSERT_EQ(info.product_id, 0x15);
+        HM_ASSERT_EQ(info.protocol_major, 4); /* gating still reads THIS */
+    }
+    fake_close(f);
+}
+
+/* The measured device says 0x14, and says it without a warning. */
+HM_TEST(the_product_the_specification_was_measured_on_is_not_warned_about)
+{
+    fake *f = fake_open(NULL);
+
+    bring_up(f);
+    HM_ASSERT_EQ(count_warnings(f, HM_WARN_UNVERIFIED_PRODUCT), 0u);
+    HM_ASSERT_EQ(k_versions[7], HM_PRODUCT_ID_MEASURED);
+    fake_close(f);
+}
+
 /* The device under test says two, and says it without a warning. */
 HM_TEST(the_two_sensor_map_this_device_sends_is_not_warned_about)
 {

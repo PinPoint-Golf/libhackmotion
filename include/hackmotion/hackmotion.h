@@ -3,7 +3,14 @@
 /*
  * hackmotion.h — umbrella header for libhackmotion.
  *
- * A sans-I/O C11 library for the HackMotion wG3 wrist sensor.
+ * A sans-I/O C11 library for HackMotion wrist sensors.
+ *
+ * ⚠ MEASURED ON ONE GENERATION.  "wG3" is wrist, generation 3, and every
+ * constant in these headers was established on that product (id 0x14).  Later
+ * generations are expected: discovery matches the family so they are still
+ * found, and hm_session raises HM_WARN_UNVERIFIED_PRODUCT so a recording says
+ * which hardware produced it.  Feature gating reads the PROTOCOL version, which
+ * is generation-independent by design.
  *
  *   docs/specification.md   what the protocol is
  *   docs/api-request.md     what the first consuming application asked for

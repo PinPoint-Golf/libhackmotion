@@ -358,7 +358,7 @@ class BleakTransport:
         timeout_us: int = RECOMMENDED_SCAN_WINDOW_US,
         on_armed: Callable[[], None] | None = None,
     ):
-        """Scan for a wG3 and return the first one seen.
+        """Scan for a HackMotion wrist sensor and return the first one seen.
 
         ⚠ DISCOVERY IS A RACE (spec §2.1).  The sensor advertises for only a few
         seconds after a physical button press and then stops, so the scanner is
@@ -398,7 +398,7 @@ class BleakTransport:
                 return await asyncio.wait_for(found, timeout=timeout_us / 1e6)
             except asyncio.TimeoutError:
                 raise TransportError(
-                    f"no HackMotion wG3 advertised in {timeout_us / 1e6:.0f} s.\n"
+                    f"no HackMotion wrist sensor advertised in {timeout_us / 1e6:.0f} s.\n"
                     "  ⚠ Two different things look like this, and only one is a "
                     "fault:\n"
                     "   · the sensor is asleep — press, pause, press again "

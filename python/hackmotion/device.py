@@ -82,7 +82,12 @@ def looks_like_hackmotion(
     local_name: str | None,
     advertised_services: Iterable[str | T.hm_uuid] | None = None,
 ) -> bool:
-    """True if an advertisement looks like a HackMotion wG3.
+    """True if an advertisement looks like a HackMotion wrist sensor.
+
+    ⚠ ANY GENERATION, not only the wG3 the specification was measured on:
+    "wG3" is wrist, generation 3, and the match is on the family prefix so a
+    later sensor is still discoverable.  Being found is not being supported —
+    the link-up checks settle that.
 
     ⚠ THE MATCH IS THE LIBRARY'S, so the advertised name lives in exactly one
     place in this project.  `local_name` may be None.  `advertised_services` may

@@ -22,8 +22,53 @@ extern "C" {
 /* Discovery (spec §2.1)                                                     */
 /* ------------------------------------------------------------------------ */
 
-/* The advertised local name, exact.  Spec §2.1. */
+/*
+ * The advertised local name of the device every measurement in the
+ * specification came from.  Spec §2.1.
+ *
+ * ⚠ MATCHING IS ON THE FAMILY PREFIX, NOT ON THIS STRING.  "wG3" is "wrist,
+ * generation 3", so the generation is part of the advertised name and a later
+ * unit advertises a different one.  Binding discovery to the exact string
+ * would make a newer sensor UNDISCOVERABLE on every stack that reports no
+ * service UUIDs in an advertisement — which is many of them — and the failure
+ * would land on first run, looking like a broken library rather than
+ * unsupported hardware.
+ *
+ * This constant remains the documented, measured name.  It is what the
+ * specification describes and what the constants in these headers were taken
+ * from; it is not the discovery filter.
+ */
 #define HM_ADVERTISED_LOCAL_NAME "HackMotion wG3"
+
+/*
+ * The wrist family, and what discovery actually matches.  A name beginning
+ * with this is offered to the user whatever generation follows.
+ *
+ * ⚠ MATCHING A DEVICE IS NOT SUPPORTING IT.  Discovery only puts a sensor in
+ * front of the user; the link-up checks that follow are what establish whether
+ * this library can speak to it — the MTU floor (HM_MIN_ATT_MTU), the version
+ * reply, and HM_WARN_UNVERIFIED_PRODUCT for a product id the specification was
+ * not measured on.  Being found and being understood are separate questions
+ * and are answered in that order.
+ */
+#define HM_ADVERTISED_NAME_PREFIX "HackMotion w"
+
+/*
+ * The product id in the 0x80 reply of the device under test, and the hardware
+ * every figure in the specification was measured on.
+ *
+ * ⚠ A DIFFERENT ID DOES NOT MEAN A DIFFERENT PROTOCOL, and it does not mean
+ * this library will not work — but it does mean the measured constants are
+ * unverified there: the sample rate, the tick rate, the history depth, the
+ * field scales and the meaning of the configuration bits were all established
+ * on this one product.  hm_session raises HM_WARN_UNVERIFIED_PRODUCT so the
+ * fact reaches the recording rather than being assumed away.
+ *
+ * ⚠ Feature GATING is a different question and does not use this: the protocol
+ * version in the same reply is what says which commands exist (§6.2, §7.1), and
+ * that mechanism is generation-independent by design.
+ */
+#define HM_PRODUCT_ID_MEASURED 0x14u
 
 /*
  * DISCOVERY IS A RACE.  The sensor advertises for only a few seconds after a
@@ -81,11 +126,19 @@ HM_API extern const hm_uuid HM_UUID_ISSC_PIPE_INERT;          /* 49535343-1e4d-4
 /* ------------------------------------------------------------------------ */
 
 /*
- * True if an advertisement looks like a HackMotion wG3.
+ * True if an advertisement looks like a HackMotion wrist sensor — ANY
+ * generation, not only the wG3 the specification was measured on.
+ *
+ * The name test is HM_ADVERTISED_NAME_PREFIX, so "HackMotion wG3" and
+ * "HackMotion wG4" both match and a non-wrist product does not.
  *
  * `local_name` may be NULL.  `advertised_services` may be NULL with
  * `service_count == 0` — many stacks report no service UUIDs in the
  * advertisement, so a name match alone is accepted.
+ *
+ * ⚠ A MATCH IS NOT A COMPATIBILITY CLAIM.  See HM_ADVERTISED_NAME_PREFIX: this
+ * decides what the user is offered, and the link-up checks decide what can
+ * actually be spoken to.
  *
  * This is a filter for a scanner the HOST runs.  It performs no I/O.
  */

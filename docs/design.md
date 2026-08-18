@@ -2,9 +2,26 @@
 <!-- Copyright (C) 2026 Mark Liversedge -->
 # libhackmotion — library design
 
-This document is the design of `libhackmotion`, a C library for the HackMotion
-wG3 wrist sensor. It describes the library as built, and is the working resource
+This document is the design of `libhackmotion`, a C library for HackMotion
+wrist sensors. It describes the library as built, and is the working resource
 a developer implements against.
+
+⚠ **One generation was measured, and the library says so rather than assuming.**
+`wG3` is *wrist, generation 3*, so later generations exist and every constant
+here came from that one product. Three decisions follow, and the
+specification's own scope statement (its preamble, "One device… and one
+generation") is what they implement:
+
+| Decision | Why |
+|---|---|
+| Discovery matches the **family prefix**, not the exact advertised name | The generation is *in* the name, and many stacks report no service UUIDs — an exact match makes a newer sensor invisible on first run |
+| An unexpected **product id warns and does not refuse** | The protocol may be identical; what is unverified is the constants, not the ability to talk |
+| Feature gating reads the **protocol version** | It is the field designed for this, and it is generation-independent |
+
+There is deliberately **no generation enum and no per-generation constants
+table**. Nothing has been captured from any generation but this one, and
+speculative structure would read as tested support for hardware nobody has put
+on a bench.
 
 It depends on one document and nothing else:
 [`specification.md`](specification.md) — what the protocol **is**. Section

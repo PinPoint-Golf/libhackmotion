@@ -3,7 +3,7 @@
 # hackmotion — Python bindings
 
 ctypes bindings for [libhackmotion](../), the sans-I/O C library for the
-HackMotion wG3 wrist sensor.
+HackMotion wrist sensor.
 
 ```sh
 cmake -S .. -B ../build/dev -DCMAKE_BUILD_TYPE=Debug

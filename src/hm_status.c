@@ -97,6 +97,7 @@ const char *hm_warning_code_name(hm_warning_code code)
         case HM_WARN_CALIBRATION_UNSOLICITED: return "calibration_unsolicited";
         case HM_WARN_CALIBRATION_STATUS_FORM: return "calibration_status_form";
         case HM_WARN_SENSOR_COUNT_UNSUPPORTED: return "sensor_count_unsupported";
+        case HM_WARN_UNVERIFIED_PRODUCT:  return "unverified_product";
         case HM_WARN_CODE_COUNT:          break;
     }
     return "invalid";

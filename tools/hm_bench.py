@@ -741,7 +741,7 @@ def find_hmwire(explicit: str | None) -> str | None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="A whole HackMotion wG3 session through libhackmotion.",
+        description="A whole HackMotion wrist-sensor session through libhackmotion.",
         epilog="Then: hmwire verify FILE && hm_gather_replay FILE",
     )
     ap.add_argument("--out", default="bench.hmwire", help="output .hmwire path")

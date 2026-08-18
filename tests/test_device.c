@@ -48,7 +48,7 @@ HM_TEST(device_uuid_parse_round_trips)
     HM_ASSERT_EQ(hm_uuid_parse(NULL, &u), HM_ERR_INVALID_ARG);
 }
 
-/* §2.1 — the advertised local name, exact.  The host scans; we supply the filter. */
+/* §2.1 — the host scans; we supply the filter. */
 HM_TEST(device_advertisement_matching)
 {
     hm_uuid services[2];
@@ -62,6 +62,40 @@ HM_TEST(device_advertisement_matching)
     services[1] = HM_UUID_TRANSPARENT_UART_SERVICE;
     HM_ASSERT(hm_looks_like_hackmotion(NULL, services, 2));
     HM_ASSERT(!hm_looks_like_hackmotion(NULL, services, 1));
+}
+
+/*
+ * ⚠ §2.1 — THE GENERATION IS PART OF THE ADVERTISED NAME.  "wG3" is wrist,
+ * generation 3, so a later sensor advertises a different string.  Matching the
+ * exact name would hide it on every stack that reports no service UUIDs — and
+ * the library's own contract says a name match alone has to be enough, because
+ * many of them do exactly that.
+ *
+ * So the filter is the FAMILY prefix.  Being found is not being supported:
+ * what this library can actually speak to is settled after link-up, by the MTU
+ * floor and by the version reply.
+ */
+HM_TEST(device_discovery_finds_a_generation_this_library_has_never_seen)
+{
+    /* The measured device, and its siblings — past and future. */
+    HM_ASSERT(hm_looks_like_hackmotion("HackMotion wG3", NULL, 0));
+    HM_ASSERT(hm_looks_like_hackmotion("HackMotion wG4", NULL, 0));
+    HM_ASSERT(hm_looks_like_hackmotion("HackMotion wG1", NULL, 0));
+    /* Two digits, whenever that day comes: no arithmetic is done on the name. */
+    HM_ASSERT(hm_looks_like_hackmotion("HackMotion wG12", NULL, 0));
+
+    /* ⚠ And the prefix is still a discriminator, not a wildcard.  A HackMotion
+     * product that is not a wrist sensor is NOT offered on its name. */
+    HM_ASSERT(!hm_looks_like_hackmotion("HackMotion Launch Monitor", NULL, 0));
+    HM_ASSERT(!hm_looks_like_hackmotion("HackMotion", NULL, 0));
+    HM_ASSERT(!hm_looks_like_hackmotion("Hack", NULL, 0));
+    HM_ASSERT(!hm_looks_like_hackmotion("", NULL, 0));
+    /* Not a substring match: the name must BEGIN with the family. */
+    HM_ASSERT(!hm_looks_like_hackmotion("My HackMotion wG3", NULL, 0));
+
+    /* The measured name is still the documented one, and still matches. */
+    HM_ASSERT_STR(HM_ADVERTISED_LOCAL_NAME, "HackMotion wG3");
+    HM_ASSERT(hm_looks_like_hackmotion(HM_ADVERTISED_LOCAL_NAME, NULL, 0));
 }
 
 /* §2.4 / api-request §2.13 — the calibration result is 65 bytes and stream

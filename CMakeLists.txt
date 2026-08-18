@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(libhackmotion
     VERSION 0.1.0
-    DESCRIPTION "Sans-I/O C library for the HackMotion wG3 BLE sensor"
+    DESCRIPTION "Sans-I/O C library for HackMotion wrist BLE sensors"
     LANGUAGES C)
 
 # ---------------------------------------------------------------------------

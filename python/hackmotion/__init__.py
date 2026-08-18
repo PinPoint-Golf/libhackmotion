@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Copyright (C) 2026 Mark Liversedge
-"""Python bindings for libhackmotion — the sans-I/O HackMotion wG3 library.
+"""Python bindings for libhackmotion — the sans-I/O HackMotion wrist-sensor library.
 
     import hackmotion
 

@@ -3607,6 +3607,21 @@ static void on_message(hm_session *s, hm_decoded *dec, hm_time_us host_recv_us)
             s->info.firmware_minor = dec->u.versions.firmware_minor;
             s->info.product_id = dec->u.versions.product_id;
             s->info.valid |= (uint32_t)HM_INFO_VERSIONS;
+            /*
+             * ⚠ NOT THE HARDWARE THE SPECIFICATION WAS MEASURED ON.  "wG3"
+             * names a generation, so later ones are expected and this is
+             * neither an error nor a refusal — the protocol may be identical,
+             * and feature gating reads the PROTOCOL version above, not this.
+             *
+             * What it does say is that every constant this library carries was
+             * established on one product and none of it has been checked here.
+             * Reported once, on the version reply, so it reaches the recording
+             * rather than being assumed away.
+             */
+            if (dec->u.versions.product_id != HM_PRODUCT_ID_MEASURED) {
+                warn_now(s, HM_WARN_UNVERIFIED_PRODUCT, (int32_t)dec->u.versions.product_id,
+                         0.0);
+            }
             maybe_enter_ready(s);
             break;
 

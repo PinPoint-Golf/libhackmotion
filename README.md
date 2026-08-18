@@ -2,7 +2,7 @@
 <!-- Copyright (C) 2026 Mark Liversedge -->
 # libhackmotion
 
-A **C11 library for integrating with HackMotion wG3 wrist sensors** over
+A **C11 library for integrating with HackMotion wrist sensors** over
 Bluetooth Low Energy, with **Python bindings** for driving one from Python.
 
 The library implements the sensor's protocol: framing and decode, session
