@@ -43,6 +43,22 @@ target_link_libraries(your_app PRIVATE wrist)
 `#include <wrist/wrist.h>` then resolves through the link — the include
 directory is `PUBLIC` on the target.
 
+If instead you install it and consume it as a package, both of the usual
+mechanisms are there and give you the same target:
+
+```cmake
+find_package(wrist CONFIG REQUIRED)
+target_link_libraries(your_app PRIVATE wrist::wrist)
+```
+
+```sh
+pkg-config --cflags --libs wrist
+```
+
+`wrist::wrist` is also defined by `add_subdirectory`, so a consumer can spell it
+the one way whichever route the library arrived by. The version file is
+`SameMinorVersion`: before 1.0 the minor is the compatibility number.
+
 You get the library and nothing else. The tests, the command line tools, the FFI
 shared object, `-Werror` and the install rules all default to ON when this is the
 top-level project and OFF when it is not, so there is no list of options to switch
