@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* SPDX-License-Identifier: MIT */
 /* Copyright (C) 2026 Mark Liversedge */
 /*
  * hackmotion/sample.h — the one sample type, live and history alike.

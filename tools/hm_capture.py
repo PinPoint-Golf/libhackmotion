@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Mark Liversedge
 """
 hm_capture.py — record real HackMotion wG3 traffic into a `.hmwire` file.

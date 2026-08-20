@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* SPDX-License-Identifier: MIT */
 /* Copyright (C) 2026 Mark Liversedge */
 /*
  * hm_test.h — a ~150-line test framework, vendored on purpose.

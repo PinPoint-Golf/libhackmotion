@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* SPDX-License-Identifier: MIT */
 /* Copyright (C) 2026 Mark Liversedge */
 /*
  * hm_gather_replay.c — drive the history gather with REAL bytes off a wG3.

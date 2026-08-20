@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Mark Liversedge
 """A reference BLE transport over `bleak`, for Linux, macOS and Windows.
 

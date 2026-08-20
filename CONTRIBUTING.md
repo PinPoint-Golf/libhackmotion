@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (C) 2026 Mark Liversedge -->
 # Contributing to libhackmotion
 
@@ -102,3 +102,15 @@ freed memory — a sample view kept past its block's release — returns plausib
 data with no report. That hazard is covered by the guard in `Samples._alive()`
 and by `tests/test_python_lifetime.py`. What ASan does catch is a fault the
 library commits at the binding's request, such as a double release.
+
+## Licensing of contributions
+
+This project is MIT licensed. By submitting a patch you certify that you wrote
+it, or otherwise have the right to submit it, and that you agree to it being
+distributed under the MIT licence — the [Developer Certificate of
+Origin](https://developercertificate.org/) states this precisely. Sign off your
+commits with `git commit -s` to record that.
+
+No contribution may include code copied from the vendor's application,
+firmware, or any other party's source. See the Disclaimer in the README for why
+that line matters here.

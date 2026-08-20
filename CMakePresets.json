@@ -3,7 +3,7 @@
   "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
   "vendor": {
     "spdx": {
-      "SPDX-License-Identifier": "LGPL-2.1-or-later",
+      "SPDX-License-Identifier": "MIT",
       "copyright": "Copyright (C) 2026 Mark Liversedge",
       "note": "JSON carries no comment syntax; `vendor` is the presets schema's own escape hatch for data CMake must ignore."
     }

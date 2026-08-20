@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* SPDX-License-Identifier: MIT */
 /* Copyright (C) 2026 Mark Liversedge */
 /*
  * hm_session.c — the sans-I/O session core.

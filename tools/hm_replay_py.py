@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Mark Liversedge
 """hm_replay_py.py — tools/hm_gather_replay.c, through the Python binding.
 

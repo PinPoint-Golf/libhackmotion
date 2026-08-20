@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Mark Liversedge
 """What a scanner needs, published as data — because the library does not scan.
 

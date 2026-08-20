@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Mark Liversedge
 # Tests link the library's sources directly rather than the built target, so
 # they can reach internal headers (hm_codec.h, hm_fit.h, hm_unwrap.h) without

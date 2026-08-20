@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (C) 2026 Mark Liversedge -->
 # libhackmotion
 
@@ -169,11 +169,12 @@ should be raised in this repository.
 
 ## Licence
 
-**GNU Lesser General Public License, version 2.1 or later** — full text in
-[`LICENSE`](LICENSE), and every source file carries an
-`SPDX-License-Identifier: LGPL-2.1-or-later` line.
+**MIT** — full text in [`LICENSE`](LICENSE), and every source file carries an
+`SPDX-License-Identifier: MIT` line.
 
-The LGPL suits a library meant to be embedded: an application may link it,
-statically or dynamically and whatever its own licence, provided the recipient
-can relink against a modified version. Changes *to this library* are what must be
-shared back.
+MIT is the licence that actually matches how this library is meant to be used.
+It is embedded, and on some platforms it can only be embedded one way: an iOS
+app is statically linked and code-signed, so a user cannot relink it against a
+modified library. A copyleft library licence that requires exactly that
+relinking is unusable there, whatever the application's own licence. MIT asks
+only that the copyright notice travels with the code.
