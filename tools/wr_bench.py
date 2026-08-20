@@ -770,7 +770,7 @@ def main() -> int:
     try:
         status = asyncio.run(bench.run())
     except TransportError as exc:
-        print(f"\nhm_bench: {exc}")
+        print(f"\nwr_bench: {exc}")
         return 1
     except KeyboardInterrupt:
         status = 0

@@ -56,7 +56,7 @@ if(WR_BUILD_TOOLS AND WR_BUILD_RECORD)
     # (`Sanitizer load violates platform policy`), so a UBSan build's four Python
     # tests fail on the interpreter that was chosen for them rather than on
     # anything in this repository.  A PATH python (Homebrew, python.org, a venv)
-    # is not a platform binary and loads it; measured under -DHM_ENABLE_UBSAN=ON,
+    # is not a platform binary and loads it; measured under -DWR_ENABLE_UBSAN=ON,
     # all 23 tests pass there against 19-and-4-failures on the framework one.  It
     # is also an end-of-life 3.9 against whatever the developer actually runs.
     # No effect off Apple: FRAMEWORK is only consulted on macOS.
@@ -225,7 +225,7 @@ if(WR_BUILD_TOOLS AND WR_BUILD_RECORD AND WR_BUILD_FFI AND Python3_Interpreter_F
         # preload rather than the policy.  UBSan needs no interceptors, so its
         # runtime arrives by ordinary dlopen of the rpath — which the same policy
         # refuses ONLY when the host process is a platform binary.  That is exactly
-        # the interpreter chosen above, so `-DHM_ENABLE_UBSAN=ON` runs all four
+        # the interpreter chosen above, so `-DWR_ENABLE_UBSAN=ON` runs all four
         # tests on a PATH python and would fail all four on the framework one.
         # ASan cannot be recovered that way: it needs DYLD_INSERT_LIBRARIES, which
         # is stripped for this runtime whatever the host.

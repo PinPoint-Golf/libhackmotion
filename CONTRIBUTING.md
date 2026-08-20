@@ -73,7 +73,7 @@ specification; do not generate them from the code they test.
 
 ```sh
 cmake -S . -B build/dev && cmake --build build/dev -j4 && ctest --test-dir build/dev
-cmake -S . -B build/san -DHM_ENABLE_ASAN=ON -DHM_ENABLE_UBSAN=ON
+cmake -S . -B build/san -DWR_ENABLE_ASAN=ON -DWR_ENABLE_UBSAN=ON
 cmake --build build/san -j4 && ctest --test-dir build/san
 ```
 

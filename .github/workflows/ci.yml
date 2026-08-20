@@ -25,7 +25,7 @@ jobs:
           # so the sanitizers cover ALL 24 tests rather than the C ones only.
           # clang still builds and runs this tree in the job above.
           - { name: "linux-san",   os: ubuntu-latest,  cc: gcc,
-              extra: "-DHM_ENABLE_ASAN=ON -DHM_ENABLE_UBSAN=ON" }
+              extra: "-DWR_ENABLE_ASAN=ON -DWR_ENABLE_UBSAN=ON" }
           - { name: "macos",       os: macos-latest,   cc: clang, extra: "" }
           - { name: "windows",     os: windows-latest, cc: "",    extra: "" }
     steps:
@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y gcovr
-      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DHM_ENABLE_COVERAGE=ON
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DWR_ENABLE_COVERAGE=ON
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
       # The core algorithms are the reason this library exists; they are held to
