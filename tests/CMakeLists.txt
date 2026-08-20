@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Mark Liversedge
 # Tests link the library's sources directly rather than the built target, so
-# they can reach internal headers (hm_codec.h, hm_fit.h, hm_unwrap.h) without
+# they can reach internal headers (wr_codec.h, wr_fit.h, wr_unwrap.h) without
 # widening the public API to make them testable.
 
-set(HM_TEST_SOURCES
+set(WR_TEST_SOURCES
     test_codec.c
     test_command.c
     test_unwrap.c
@@ -18,19 +18,19 @@ set(HM_TEST_SOURCES
     test_session.c
 )
 
-# The `.hmwire` container lives in a separate target because it opens files; the
+# The `.wrwire` container lives in a separate target because it opens files; the
 # purity gate below is why the core cannot.
-if(HM_BUILD_RECORD)
-    list(APPEND HM_TEST_SOURCES test_record.c)
+if(WR_BUILD_RECORD)
+    list(APPEND WR_TEST_SOURCES test_record.c)
 endif()
 
-foreach(src ${HM_TEST_SOURCES})
+foreach(src ${WR_TEST_SOURCES})
     get_filename_component(name ${src} NAME_WE)
     add_executable(${name} ${src})
     if(name STREQUAL "test_record")
-        target_link_libraries(${name} PRIVATE hackmotion_record hm_build_flags)
+        target_link_libraries(${name} PRIVATE wrist_record wr_build_flags)
     else()
-        target_link_libraries(${name} PRIVATE hackmotion hm_build_flags)
+        target_link_libraries(${name} PRIVATE wrist wr_build_flags)
     endif()
     target_include_directories(${name} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -44,11 +44,11 @@ foreach(src ${HM_TEST_SOURCES})
     set_tests_properties(${name} PROPERTIES TIMEOUT 120)
 endforeach()
 
-# ⚠ Two implementations of one container format — tools/hm_capture.py writes it
-# and record/hm_record.c reads it — pinned against each other.  A drift there
+# ⚠ Two implementations of one container format — tools/wr_capture.py writes it
+# and record/wr_record.c reads it — pinned against each other.  A drift there
 # would produce a capture that only turns out to be unreadable later, by which
 # time the sensor and the session are gone.  Skipped, loudly, with no python3.
-if(HM_BUILD_TOOLS AND HM_BUILD_RECORD)
+if(WR_BUILD_TOOLS AND WR_BUILD_RECORD)
     # ⚠ macOS: PREFER THE INTERPRETER ON PATH OVER THE FRAMEWORK ONE, because the
     # framework FindPython3 picks by default is the Command Line Tools' Python
     # 3.9 — a SIGNED PLATFORM BINARY, and that is not a cosmetic difference here.
@@ -68,7 +68,7 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD)
         add_test(NAME capture_format
                  COMMAND ${Python3_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/test_capture_format.py
-                         $<TARGET_FILE:hmwire>)
+                         $<TARGET_FILE:wrwire>)
         # See the note further down: cp1252 stdout on Windows cannot encode this
         # project's own report glyphs.
         set_tests_properties(capture_format PROPERTIES ENVIRONMENT
@@ -81,26 +81,26 @@ endif()
 # ---------------------------------------------------------------------------
 # The Python binding
 #
-# ⚠ SAME SHAPE AGAIN, ONE REGISTER UP.  python/hackmotion/_types.py declares
-# every public struct and enum a SECOND time, in ctypes.  hm_abi_check() guards
+# ⚠ SAME SHAPE AGAIN, ONE REGISTER UP.  python/wrist/_types.py declares
+# every public struct and enum a SECOND time, in ctypes.  wr_abi_check() guards
 # nine struct SIZES at load and nothing else — not one field offset, not one
 # enumerator — so a `skew_us` one slot out decodes every sample into plausible
 # nonsense with no error anywhere.
 #
-# `hmwire abi` reads the real layout out of the compiler and this compares the
+# `wrwire abi` reads the real layout out of the compiler and this compares the
 # two.  It found two genuine transcription errors on the day it was written:
-# hm_gap_kind's first two members were the wrong way round, and four of eleven
+# wr_gap_kind's first two members were the wrong way round, and four of eleven
 # history statuses were on the wrong numbers.
 # ---------------------------------------------------------------------------
-if(HM_BUILD_TOOLS AND HM_BUILD_RECORD AND HM_BUILD_FFI AND Python3_Interpreter_FOUND)
+if(WR_BUILD_TOOLS AND WR_BUILD_RECORD AND WR_BUILD_FFI AND Python3_Interpreter_FOUND)
     # ⚠ The .so is passed explicitly rather than discovered.  This must pin the
     # layout of the object THIS build produced — a search that found build/dev
     # while testing build/san would report on the wrong artefact and pass.
     add_test(NAME python_abi
              COMMAND ${Python3_EXECUTABLE}
                      ${CMAKE_CURRENT_SOURCE_DIR}/test_python_abi.py
-                     $<TARGET_FILE:hmwire>
-                     $<TARGET_FILE:hackmotion_ffi>)
+                     $<TARGET_FILE:wrwire>
+                     $<TARGET_FILE:wrist_ffi>)
 
     # ⚠ THE ONLY CHECK THE BINDING GETS AGAINST DATA RATHER THAN DECLARATIONS.
     # The same gather is driven twice over the same real capture — once from C,
@@ -116,8 +116,8 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD AND HM_BUILD_FFI AND Python3_Interpreter_F
     add_test(NAME python_replay_parity
              COMMAND ${Python3_EXECUTABLE}
                      ${CMAKE_CURRENT_SOURCE_DIR}/test_python_replay.py
-                     $<TARGET_FILE:hm_gather_replay>
-                     $<TARGET_FILE:hackmotion_ffi>)
+                     $<TARGET_FILE:wr_gather_replay>
+                     $<TARGET_FILE:wrist_ffi>)
     set_tests_properties(python_replay_parity PROPERTIES TIMEOUT 300)
 
     # ⚠ THE ONE HAZARD CTYPES ADDS THAT C DOES NOT HAVE.  A history block owns
@@ -128,11 +128,11 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD AND HM_BUILD_FFI AND Python3_Interpreter_F
     add_test(NAME python_lifetime
              COMMAND ${Python3_EXECUTABLE}
                      ${CMAKE_CURRENT_SOURCE_DIR}/test_python_lifetime.py
-                     $<TARGET_FILE:hackmotion_ffi>
-                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/swings.hmwire)
+                     $<TARGET_FILE:wrist_ffi>
+                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/swings.wrwire)
 
     # ⚠ THE REFERENCE TRANSPORT, WITH THE RADIO REPLACED AND NOTHING ELSE.
-    # `python/hackmotion/bleak_transport.py` is the one piece of this project a
+    # `python/wrist/bleak_transport.py` is the one piece of this project a
     # user's first hour runs through, and an untested transport that LOOKS
     # finished is worse than an honestly partial one.  The loopback drives the
     # transport's own notification callback, its own pump, its own drains and
@@ -144,13 +144,13 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD AND HM_BUILD_FFI AND Python3_Interpreter_F
     # is written at the top of the file rather than left to be assumed.
     #
     # ⚠ Both regimes again, and for the same reason as `gather_replay`: a check
-    # that only ever sees `swings.hmwire` has seen half the device.
+    # that only ever sees `swings.wrwire` has seen half the device.
     add_test(NAME python_transport_loopback
              COMMAND ${Python3_EXECUTABLE}
                      ${CMAKE_CURRENT_SOURCE_DIR}/test_python_transport.py
-                     $<TARGET_FILE:hackmotion_ffi>
-                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/swings.hmwire
-                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/session1.hmwire)
+                     $<TARGET_FILE:wrist_ffi>
+                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/swings.wrwire
+                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/session1.wrwire)
     set_tests_properties(python_transport_loopback PROPERTIES TIMEOUT 300)
 
     # ⚠ These harnesses report in the house style — ⚠, ⛔, ≈, § — and Windows
@@ -180,21 +180,21 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD AND HM_BUILD_FFI AND Python3_Interpreter_F
     #
     # What this run does catch is a fault the LIBRARY commits at the binding's
     # request — a double release, a stale pointer handed back in, a wrong length
-    # into hm_session_on_bytes.  Those are real and this is the only thing that
+    # into wr_session_on_bytes.  Those are real and this is the only thing that
     # sees them; a deliberate double release reports heap-use-after-free here.
     #
     # The stale-view half is covered instead by the guard in Samples._alive()
-    # (python/hackmotion/session.py), which raises rather than reading.
+    # (python/wrist/session.py), which raises rather than reading.
     #
     # ⚠ THE RUNTIME IS NAMED DIFFERENTLY BY EACH COMPILER, and getting it wrong
     # is not a skip — it is four failing tests.  gcc ships a shared libasan.so
     # and finds it with -print-file-name.  clang links its runtime STATICALLY
     # into executables by default, so nothing resolves the __asan_*/__ubsan_*
-    # symbols in libhackmotion_ffi.so when ctypes dlopen()s it; its shared
+    # symbols in libwrist_ffi.so when ctypes dlopen()s it; its shared
     # runtime lives in -print-runtime-dir under an architecture-specific name.
     # This is why the sanitizer job passed under gcc here and failed under clang
     # in CI on the same source.
-    if((HM_ENABLE_ASAN OR HM_ENABLE_UBSAN) AND NOT MSVC)
+    if((WR_ENABLE_ASAN OR WR_ENABLE_UBSAN) AND NOT MSVC)
         #
         # ⛔ macOS + ASan IS THE ONE CASE WHERE THE PRELOAD CANNOT EXIST, so it is
         # the one case that skips instead of failing.  The rule above — a missing
@@ -229,7 +229,7 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD AND HM_BUILD_FFI AND Python3_Interpreter_F
         # tests on a PATH python and would fail all four on the framework one.
         # ASan cannot be recovered that way: it needs DYLD_INSERT_LIBRARIES, which
         # is stripped for this runtime whatever the host.
-        if(APPLE AND HM_ENABLE_ASAN)
+        if(APPLE AND WR_ENABLE_ASAN)
             set_tests_properties(python_abi python_replay_parity python_lifetime
                 python_transport_loopback
                 PROPERTIES DISABLED TRUE)
@@ -239,27 +239,27 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD AND HM_BUILD_FFI AND Python3_Interpreter_F
                 "(`Sanitizer load violates platform policy`). The Linux/gcc CI "
                 "sanitizer job is what covers them.")
         else()
-            set(HM_SAN_RUNTIME "")
+            set(WR_SAN_RUNTIME "")
             execute_process(COMMAND ${CMAKE_C_COMPILER} -print-file-name=libasan.so
-                            OUTPUT_VARIABLE HM_SAN_RUNTIME
+                            OUTPUT_VARIABLE WR_SAN_RUNTIME
                             OUTPUT_STRIP_TRAILING_WHITESPACE
                             ERROR_QUIET)
-            if(NOT EXISTS "${HM_SAN_RUNTIME}")
+            if(NOT EXISTS "${WR_SAN_RUNTIME}")
                 execute_process(COMMAND ${CMAKE_C_COMPILER} -print-runtime-dir
-                                OUTPUT_VARIABLE HM_SAN_RTDIR
+                                OUTPUT_VARIABLE WR_SAN_RTDIR
                                 OUTPUT_STRIP_TRAILING_WHITESPACE
                                 ERROR_QUIET)
-                file(GLOB HM_SAN_CANDIDATES "${HM_SAN_RTDIR}/libclang_rt.asan*.so")
-                if(HM_SAN_CANDIDATES)
-                    list(GET HM_SAN_CANDIDATES 0 HM_SAN_RUNTIME)
+                file(GLOB WR_SAN_CANDIDATES "${WR_SAN_RTDIR}/libclang_rt.asan*.so")
+                if(WR_SAN_CANDIDATES)
+                    list(GET WR_SAN_CANDIDATES 0 WR_SAN_RUNTIME)
                 endif()
             endif()
-            if(EXISTS "${HM_SAN_RUNTIME}")
+            if(EXISTS "${WR_SAN_RUNTIME}")
                 set_tests_properties(python_abi python_replay_parity python_lifetime
                     python_transport_loopback
                     PROPERTIES ENVIRONMENT
-                    "LD_PRELOAD=${HM_SAN_RUNTIME};ASAN_OPTIONS=detect_leaks=0;PYTHONIOENCODING=utf-8")
-            elseif(HM_ENABLE_ASAN)
+                    "LD_PRELOAD=${WR_SAN_RUNTIME};ASAN_OPTIONS=detect_leaks=0;PYTHONIOENCODING=utf-8")
+            elseif(WR_ENABLE_ASAN)
                 # ⚠ ASan only.  A UBSan-only build needs no preload on any platform
                 # this reaches, so warning there would be crying wolf.
                 message(STATUS
@@ -279,24 +279,24 @@ endif()
 # Every other test in this directory drives a fake transport that was told what
 # to return; these two drive the device's own bytes.
 # ---------------------------------------------------------------------------
-if(HM_BUILD_TOOLS AND HM_BUILD_RECORD)
-    set(HM_FIXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+if(WR_BUILD_TOOLS AND WR_BUILD_RECORD)
+    set(WR_FIXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 
     # The container itself, so a fixture corrupted in transit is caught on the
     # commit that corrupts it rather than a phase later.
     foreach(capture smoke session1 swings)
         add_test(NAME capture_verify_${capture}
-                 COMMAND hmwire verify ${HM_FIXTURE_DIR}/${capture}.hmwire)
+                 COMMAND wrwire verify ${WR_FIXTURE_DIR}/${capture}.wrwire)
     endforeach()
 
     # Six real mid-stream pulls through the shipping gather.  Exit 0 means every
     # verdict passed WITH observations behind it; exit 3 means nothing was
     # checked, which the tool reports rather than passing quietly.
     add_test(NAME gather_replay
-             COMMAND hm_gather_replay ${HM_FIXTURE_DIR}/swings.hmwire)
+             COMMAND wr_gather_replay ${WR_FIXTURE_DIR}/swings.wrwire)
     set_tests_properties(gather_replay PROPERTIES TIMEOUT 120)
 
-    # ⚠ AND THE OTHER REGIME, WHICH swings.hmwire CANNOT REACH.  Its five pulls
+    # ⚠ AND THE OTHER REGIME, WHICH swings.wrwire CANNOT REACH.  Its five pulls
     # are over swings and come back at 657-728 Hz; this one is a calibration
     # choreography, so its single pull is over a wrist that was held still and
     # comes back at §7.3's 100 Hz floor — the shape a desk produces and the one
@@ -305,7 +305,7 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD)
     # the only real-hardware evidence this project has that "unwrap internally,
     # re-wrap when asking" (§7.4) holds above 131,072.
     add_test(NAME gather_replay_at_the_hundred_hertz_floor
-             COMMAND hm_gather_replay ${HM_FIXTURE_DIR}/session1.hmwire)
+             COMMAND wr_gather_replay ${WR_FIXTURE_DIR}/session1.wrwire)
     set_tests_properties(gather_replay_at_the_hundred_hertz_floor PROPERTIES TIMEOUT 120)
 
     # ⚠ And the same tool over a capture with NO retrieval in it must say so.
@@ -319,7 +319,7 @@ if(HM_BUILD_TOOLS AND HM_BUILD_RECORD)
     # cannot satisfy it — which is what makes it a real assertion and not just
     # "some output appeared".
     add_test(NAME gather_replay_reports_no_evidence_when_nothing_was_pulled
-             COMMAND hm_gather_replay ${HM_FIXTURE_DIR}/smoke.hmwire)
+             COMMAND wr_gather_replay ${WR_FIXTURE_DIR}/smoke.wrwire)
     set_tests_properties(gather_replay_reports_no_evidence_when_nothing_was_pulled
                          PROPERTIES PASS_REGULAR_EXPRESSION
                                     "NOTHING WAS CHECKED: no block was produced")
@@ -332,6 +332,6 @@ endif()
 if(UNIX AND NOT APPLE)
     add_test(NAME purity
              COMMAND ${CMAKE_COMMAND}
-                     -DLIB=$<TARGET_FILE:hackmotion>
+                     -DLIB=$<TARGET_FILE:wrist>
                      -P ${CMAKE_CURRENT_SOURCE_DIR}/purity.cmake)
 endif()

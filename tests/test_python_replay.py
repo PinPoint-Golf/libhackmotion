@@ -24,11 +24,11 @@ that never varies is a check that has stopped running, and this project has been
 caught by exactly that — `density` was pinned at 1.000 for every reply that ever
 arrived, and was published as a positive finding across seven real pulls.
 
-⚠ BOTH FIXTURES, EVERY TIME.  swings.hmwire is the 657-728 Hz regime and
-session1.hmwire is the 100.5 Hz one past two index wraps.  A check that only ever
+⚠ BOTH FIXTURES, EVERY TIME.  swings.wrwire is the 657-728 Hz regime and
+session1.wrwire is the 100.5 Hz one past two index wraps.  A check that only ever
 sees one of them has seen half the device.
 
-Usage: test_python_replay.py <hm_gather_replay> <libhackmotion_ffi.so>
+Usage: test_python_replay.py <wr_gather_replay> <libwrist_ffi.so>
 """
 
 import json
@@ -40,7 +40,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "fixtures" if (ROOT / "fixtures").is_dir() else ROOT / "tests" / "fixtures"
-REPLAY_PY = ROOT / "tools" / "hm_replay_py.py"
+REPLAY_PY = ROOT / "tools" / "wr_replay_py.py"
 
 failures = 0
 checks = 0
@@ -74,14 +74,14 @@ def main() -> int:
     env = dict(os.environ)
     # ⚠ Pin the binding to the object THIS build produced.  A search that found
     # build/dev while testing build/san would report on the wrong artefact.
-    env["HACKMOTION_LIBRARY"] = library
+    env["WRIST_LIBRARY"] = library
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         for name in ("swings", "session1", "smoke"):
-            fixture = FIXTURES / f"{name}.hmwire"
+            fixture = FIXTURES / f"{name}.wrwire"
             if not fixture.is_file():
-                check(False, f"{name}.hmwire is present")
+                check(False, f"{name}.wrwire is present")
                 continue
 
             c_rc, c_data, c_run = run(
@@ -103,7 +103,7 @@ def main() -> int:
                 continue
 
             # ⚠ The exit code is part of the answer, and the important half is
-            # the empty case: smoke.hmwire has no retrieval in it, and BOTH tools
+            # the empty case: smoke.wrwire has no retrieval in it, and BOTH tools
             # must say "nothing was checked" (3) rather than passing quietly.
             check(c_rc == py_rc, f"{name}: same exit code ({c_rc})")
 

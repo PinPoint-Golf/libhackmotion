@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (C) 2026 Mark Liversedge */
 /*
- * test_record.c — the `.hmwire` container and the reconciliation that reads a
+ * test_record.c — the `.wrwire` container and the reconciliation that reads a
  * capture back against the specification.
  *
  * Two families of claim are pinned here.
@@ -16,22 +16,22 @@
  *   failure mode this whole phase is built against — so the empty-capture case
  *   is a test, not a comment.
  */
-#include "hm_test.h"
-#include "hm_wire.h"
+#include "wr_test.h"
+#include "wr_wire.h"
 
-#include "hackmotion/record.h"
+#include "wrist/record.h"
 
 #include <math.h>
 
-#define TMP_PATH "test_record_tmp.hmwire"
+#define TMP_PATH "test_record_tmp.wrwire"
 
 /* ------------------------------------------------------------------------ */
 /* Helpers                                                                   */
 /* ------------------------------------------------------------------------ */
-static hm_wire_chunk make_chunk(uint8_t direction, uint32_t sequence, hm_time_us t,
+static wr_wire_chunk make_chunk(uint8_t direction, uint32_t sequence, wr_time_us t,
                                 const uint8_t *data, size_t length)
 {
-    hm_wire_chunk c;
+    wr_wire_chunk c;
     memset(&c, 0, sizeof(c));
     c.direction = direction;
     c.sequence = sequence;
@@ -62,7 +62,7 @@ typedef struct synth_options {
     int16_t  palm_accel;
     int16_t  gyro;             /* raw counts on both units                      */
     bool     bringup;          /* emit §9.1's vendor sequence first             */
-    hm_time_us keepalive_period_us; /* 0 → no keepalive writes                  */
+    wr_time_us keepalive_period_us; /* 0 → no keepalive writes                  */
     uint8_t  header_config_bits;    /* 0 → 0x7e; what the FILE HEADER claims     */
     /* ⚠ Deterministic ± jitter on the palm's tick counter, to give the
      * relative-rate fit a real residual spread.  Without one, every synthetic
@@ -110,12 +110,12 @@ static int tick_jitter(uint32_t index, int j)
  */
 static void write_synthetic(const synth_options *o)
 {
-    hm_recording_info info = hm_recording_info_default();
-    hm_recorder *rec = NULL;
+    wr_recording_info info = wr_recording_info_default();
+    wr_recorder *rec = NULL;
     uint32_t seq = 0u;
     uint32_t index = 0u;
-    hm_time_us t0 = 1000000;
-    hm_time_us last_keepalive = t0;
+    wr_time_us t0 = 1000000;
+    wr_time_us last_keepalive = t0;
     uint8_t buf[128];
     size_t n;
 
@@ -123,7 +123,7 @@ static void write_synthetic(const synth_options *o)
     if (o->header_config_bits != 0u) {
         info.config_bits = o->header_config_bits;
     }
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, &info, &rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, &info, &rec), WR_OK);
 
     if (o->bringup) {
         /* §9.1, verbatim.  Only step 2 is required of a client; the rest is the
@@ -132,44 +132,44 @@ static void write_synthetic(const synth_options *o)
         static const uint8_t seqbytes[] = {0x80u, 0x81u, 0x84u, 0x81u,
                                            0x86u, 0x86u, 0x86u, 0x85u};
         for (size_t i = 0; i < sizeof(seqbytes); ++i) {
-            hm_wire_chunk c =
-                make_chunk(HM_WIRE_HOST_TO_DEVICE, seq++, t0 + (hm_time_us)i * 1000,
+            wr_wire_chunk c =
+                make_chunk(WR_WIRE_HOST_TO_DEVICE, seq++, t0 + (wr_time_us)i * 1000,
                            &seqbytes[i], 1u);
-            HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+            WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
         }
     }
 
     {
-        uint8_t start[3] = {0xa0u, 0x01u, HM_CONFIG_OBSERVED_DEFAULT};
-        hm_wire_chunk c = make_chunk(HM_WIRE_HOST_TO_DEVICE, seq++, t0 + 20000, start, 3u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        uint8_t start[3] = {0xa0u, 0x01u, WR_CONFIG_OBSERVED_DEFAULT};
+        wr_wire_chunk c = make_chunk(WR_WIRE_HOST_TO_DEVICE, seq++, t0 + 20000, start, 3u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
     }
     t0 += 20000 + 60000; /* §6.1: the first frame arrives within 50-80 ms */
 
     for (int i = 0; i < o->records; ++i) {
-        hm_wire_block arm = hm_wire_identity_block(ticks_for(index, 0));
-        hm_wire_block palm = hm_wire_identity_block(
+        wr_wire_block arm = wr_wire_identity_block(ticks_for(index, 0));
+        wr_wire_block palm = wr_wire_identity_block(
             ticks_for(index, SYNTH_SKEW_TICKS + tick_jitter(index, o->palm_tick_jitter)));
-        hm_time_us t;
-        hm_wire_chunk c;
+        wr_time_us t;
+        wr_wire_chunk c;
 
         arm.accel[0] = o->arm_accel;
         palm.accel[0] = o->palm_accel;
         arm.gyro[0] = o->gyro;
         palm.gyro[0] = o->gyro;
 
-        n = hm_wire_notification1(buf, (uint16_t)index, &arm, &palm);
-        t = t0 + (hm_time_us)((double)index * 1e6 / SYNTH_RATE_HZ + 0.5);
+        n = wr_wire_notification1(buf, (uint16_t)index, &arm, &palm);
+        t = t0 + (wr_time_us)((double)index * 1e6 / SYNTH_RATE_HZ + 0.5);
 
         if (o->keepalive_period_us > 0 && t - last_keepalive >= o->keepalive_period_us) {
             uint8_t poll = 0x81u;
-            hm_wire_chunk k = make_chunk(HM_WIRE_HOST_TO_DEVICE, seq++, t, &poll, 1u);
-            HM_ASSERT_EQ(hm_recorder_write(rec, &k, 1u), HM_OK);
+            wr_wire_chunk k = make_chunk(WR_WIRE_HOST_TO_DEVICE, seq++, t, &poll, 1u);
+            WR_ASSERT_EQ(wr_recorder_write(rec, &k, 1u), WR_OK);
             last_keepalive = t;
         }
 
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
 
         /* §6.6: bursts reach index step 1 — the full internal rate — and they
          * appear in every session containing motion. */
@@ -179,50 +179,50 @@ static void write_synthetic(const synth_options *o)
                 arm.ticks = ticks_for(index, 0);
                 palm.ticks = ticks_for(
                     index, SYNTH_SKEW_TICKS + tick_jitter(index, o->palm_tick_jitter));
-                n = hm_wire_notification1(buf, (uint16_t)index, &arm, &palm);
-                t = t0 + (hm_time_us)((double)index * 1e6 / SYNTH_RATE_HZ + 0.5);
-                c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
-                HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+                n = wr_wire_notification1(buf, (uint16_t)index, &arm, &palm);
+                t = t0 + (wr_time_us)((double)index * 1e6 / SYNTH_RATE_HZ + 0.5);
+                c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
+                WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
             }
         }
         index += o->step;
     }
 
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 }
 
-static void reconcile_file(hm_reconcile_report *out)
+static void reconcile_file(wr_reconcile_report *out)
 {
-    hm_replay *rp = NULL;
-    hm_reconciler *rc = NULL;
-    hm_wire_chunk c;
-    hm_status st;
+    wr_replay *rp = NULL;
+    wr_reconciler *rc = NULL;
+    wr_wire_chunk c;
+    wr_status st;
 
-    HM_ASSERT_EQ(hm_replay_open(TMP_PATH, &rp), HM_OK);
-    HM_ASSERT_EQ(hm_reconcile_begin(hm_replay_info(rp), &rc), HM_OK);
-    while ((st = hm_replay_next(rp, &c)) == HM_OK) {
-        hm_reconcile_observe(rc, &c);
+    WR_ASSERT_EQ(wr_replay_open(TMP_PATH, &rp), WR_OK);
+    WR_ASSERT_EQ(wr_reconcile_begin(wr_replay_info(rp), &rc), WR_OK);
+    while ((st = wr_replay_next(rp, &c)) == WR_OK) {
+        wr_reconcile_observe(rc, &c);
     }
-    HM_ASSERT_EQ(st, HM_DONE);
-    hm_reconcile_finish(rc, out);
-    hm_reconcile_free(rc);
-    hm_replay_close(rp);
+    WR_ASSERT_EQ(st, WR_DONE);
+    wr_reconcile_finish(rc, out);
+    wr_reconcile_free(rc);
+    wr_replay_close(rp);
 }
 
 /* ------------------------------------------------------------------------ */
 /* The container                                                             */
 /* ------------------------------------------------------------------------ */
-HM_TEST(record_round_trips_every_chunk_field_byte_exactly)
+WR_TEST(record_round_trips_every_chunk_field_byte_exactly)
 {
-    static const size_t lengths[] = {0u, 1u, 47u, 93u, 255u, HM_WIRE_CHUNK_MAX};
-    hm_recorder *rec = NULL;
-    hm_replay *rp = NULL;
-    hm_wire_chunk written[6];
-    hm_wire_chunk read_back;
-    hm_recording_info info = hm_recording_info_default();
+    static const size_t lengths[] = {0u, 1u, 47u, 93u, 255u, WR_WIRE_CHUNK_MAX};
+    wr_recorder *rec = NULL;
+    wr_replay *rp = NULL;
+    wr_wire_chunk written[6];
+    wr_wire_chunk read_back;
+    wr_recording_info info = wr_recording_info_default();
 
     for (size_t i = 0; i < 6u; ++i) {
-        uint8_t payload[HM_WIRE_CHUNK_MAX];
+        uint8_t payload[WR_WIRE_CHUNK_MAX];
         for (size_t b = 0; b < lengths[i]; ++b) {
             payload[b] = (uint8_t)(b * 7u + i);
         }
@@ -230,128 +230,128 @@ HM_TEST(record_round_trips_every_chunk_field_byte_exactly)
          * differences matter (types.h).  A container that assumed unsigned
          * would work on one host and corrupt a capture on another. */
         written[i] = make_chunk((uint8_t)(i % 3u), (uint32_t)(1000u + i),
-                                (hm_time_us)-500000 + (hm_time_us)i * 1000, payload,
+                                (wr_time_us)-500000 + (wr_time_us)i * 1000, payload,
                                 lengths[i]);
-        written[i].flags = (uint8_t)((i == 2u) ? HM_WIRE_REDACTED : 0u);
+        written[i].flags = (uint8_t)((i == 2u) ? WR_WIRE_REDACTED : 0u);
     }
 
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, &info, &rec), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_write(rec, written, 6u), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_chunks(rec), 6u);
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, &info, &rec), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_write(rec, written, 6u), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_chunks(rec), 6u);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 
-    HM_ASSERT_EQ(hm_replay_open(TMP_PATH, &rp), HM_OK);
+    WR_ASSERT_EQ(wr_replay_open(TMP_PATH, &rp), WR_OK);
     for (size_t i = 0; i < 6u; ++i) {
-        HM_ASSERT_EQ(hm_replay_next(rp, &read_back), HM_OK);
-        HM_ASSERT_EQ(read_back.length, written[i].length);
-        HM_ASSERT_EQ(read_back.direction, written[i].direction);
-        HM_ASSERT_EQ(read_back.flags, written[i].flags);
-        HM_ASSERT_EQ(read_back.sequence, written[i].sequence);
-        HM_ASSERT_EQ(read_back.host_time_us, written[i].host_time_us);
-        HM_ASSERT(memcmp(read_back.data, written[i].data, written[i].length) == 0);
+        WR_ASSERT_EQ(wr_replay_next(rp, &read_back), WR_OK);
+        WR_ASSERT_EQ(read_back.length, written[i].length);
+        WR_ASSERT_EQ(read_back.direction, written[i].direction);
+        WR_ASSERT_EQ(read_back.flags, written[i].flags);
+        WR_ASSERT_EQ(read_back.sequence, written[i].sequence);
+        WR_ASSERT_EQ(read_back.host_time_us, written[i].host_time_us);
+        WR_ASSERT(memcmp(read_back.data, written[i].data, written[i].length) == 0);
     }
-    HM_ASSERT_EQ(hm_replay_next(rp, &read_back), HM_DONE);
-    hm_replay_close(rp);
+    WR_ASSERT_EQ(wr_replay_next(rp, &read_back), WR_DONE);
+    wr_replay_close(rp);
     remove(TMP_PATH);
 }
 
 /*
  * ⚠ The sequence number is the field design §5.6's sketch did not have.  It is
- * here because HM_WIRE_LOST says chunks were dropped but not HOW MANY: a reader
+ * here because WR_WIRE_LOST says chunks were dropped but not HOW MANY: a reader
  * renumbering from its own ordinal would turn a lossy recording into a
  * complete-looking one, and nothing downstream would ever say so.
  */
-HM_TEST(record_preserves_a_sequence_gap_rather_than_renumbering_it)
+WR_TEST(record_preserves_a_sequence_gap_rather_than_renumbering_it)
 {
-    hm_recorder *rec = NULL;
-    hm_replay *rp = NULL;
+    wr_recorder *rec = NULL;
+    wr_replay *rp = NULL;
     uint8_t byte = 0x90u;
-    hm_wire_chunk c[2];
-    hm_wire_chunk back;
+    wr_wire_chunk c[2];
+    wr_wire_chunk back;
 
-    c[0] = make_chunk(HM_WIRE_DEVICE_TO_HOST, 10u, 1000, &byte, 1u);
-    c[1] = make_chunk(HM_WIRE_DEVICE_TO_HOST, 900u, 2000, &byte, 1u);
-    c[1].flags = HM_WIRE_LOST;
+    c[0] = make_chunk(WR_WIRE_DEVICE_TO_HOST, 10u, 1000, &byte, 1u);
+    c[1] = make_chunk(WR_WIRE_DEVICE_TO_HOST, 900u, 2000, &byte, 1u);
+    c[1].flags = WR_WIRE_LOST;
 
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, NULL, &rec), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_write(rec, c, 2u), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, NULL, &rec), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_write(rec, c, 2u), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 
-    HM_ASSERT_EQ(hm_replay_open(TMP_PATH, &rp), HM_OK);
-    HM_ASSERT_EQ(hm_replay_next(rp, &back), HM_OK);
-    HM_ASSERT_EQ(back.sequence, 10u);
-    HM_ASSERT_EQ(hm_replay_next(rp, &back), HM_OK);
-    HM_ASSERT_EQ(back.sequence, 900u);
-    HM_ASSERT_EQ(back.flags & HM_WIRE_LOST, HM_WIRE_LOST);
-    hm_replay_close(rp);
+    WR_ASSERT_EQ(wr_replay_open(TMP_PATH, &rp), WR_OK);
+    WR_ASSERT_EQ(wr_replay_next(rp, &back), WR_OK);
+    WR_ASSERT_EQ(back.sequence, 10u);
+    WR_ASSERT_EQ(wr_replay_next(rp, &back), WR_OK);
+    WR_ASSERT_EQ(back.sequence, 900u);
+    WR_ASSERT_EQ(back.flags & WR_WIRE_LOST, WR_WIRE_LOST);
+    wr_replay_close(rp);
     remove(TMP_PATH);
 }
 
-HM_TEST(record_header_round_trips_and_says_which_clock_was_used)
+WR_TEST(record_header_round_trips_and_says_which_clock_was_used)
 {
-    hm_recorder *rec = NULL;
-    hm_replay *rp = NULL;
-    hm_recording_info info = hm_recording_info_default();
+    wr_recorder *rec = NULL;
+    wr_replay *rp = NULL;
+    wr_recording_info info = wr_recording_info_default();
 
     memcpy(info.device_id, "wG3-under-test", sizeof("wG3-under-test"));
     info.config_bits = 0x5eu; /* ⚠ bit 5 clear: 20-byte blocks, no tick counter */
     info.identifiers_recorded = true;
 
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, &info, &rec), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, &info, &rec), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 
-    HM_ASSERT_EQ(hm_replay_open(TMP_PATH, &rp), HM_OK);
-    HM_ASSERT_STR(hm_replay_info(rp)->device_id, "wG3-under-test");
-    HM_ASSERT_EQ(hm_replay_info(rp)->config_bits, 0x5eu);
-    HM_ASSERT_EQ(hm_replay_info(rp)->config_legacy, 0u);
-    HM_ASSERT_EQ(hm_replay_info(rp)->layout_version, HM_SAMPLE_LAYOUT_VERSION);
-    HM_ASSERT_EQ(hm_replay_info(rp)->identifiers_recorded, true);
-    HM_ASSERT_STR(hm_replay_info(rp)->clock, HM_RECORD_CLOCK_MONOTONIC);
-    hm_replay_close(rp);
+    WR_ASSERT_EQ(wr_replay_open(TMP_PATH, &rp), WR_OK);
+    WR_ASSERT_STR(wr_replay_info(rp)->device_id, "wG3-under-test");
+    WR_ASSERT_EQ(wr_replay_info(rp)->config_bits, 0x5eu);
+    WR_ASSERT_EQ(wr_replay_info(rp)->config_legacy, 0u);
+    WR_ASSERT_EQ(wr_replay_info(rp)->layout_version, WR_SAMPLE_LAYOUT_VERSION);
+    WR_ASSERT_EQ(wr_replay_info(rp)->identifiers_recorded, true);
+    WR_ASSERT_STR(wr_replay_info(rp)->clock, WR_RECORD_CLOCK_MONOTONIC);
+    wr_replay_close(rp);
     remove(TMP_PATH);
 }
 
 /* The legacy `82` start takes no configuration byte at all, so it cannot be
  * spelled as a value of `config` (config.h) and gets its own word. */
-HM_TEST(record_header_distinguishes_the_legacy_start_from_a_config_byte)
+WR_TEST(record_header_distinguishes_the_legacy_start_from_a_config_byte)
 {
-    hm_recorder *rec = NULL;
-    hm_replay *rp = NULL;
-    hm_recording_info info = hm_recording_info_default();
+    wr_recorder *rec = NULL;
+    wr_replay *rp = NULL;
+    wr_recording_info info = wr_recording_info_default();
 
     info.config_legacy = 1u;
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, &info, &rec), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
-    HM_ASSERT_EQ(hm_replay_open(TMP_PATH, &rp), HM_OK);
-    HM_ASSERT_EQ(hm_replay_info(rp)->config_legacy, 1u);
-    hm_replay_close(rp);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, &info, &rec), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
+    WR_ASSERT_EQ(wr_replay_open(TMP_PATH, &rp), WR_OK);
+    WR_ASSERT_EQ(wr_replay_info(rp)->config_legacy, 1u);
+    wr_replay_close(rp);
     remove(TMP_PATH);
 }
 
-HM_TEST(record_refuses_a_file_that_is_not_a_recording)
+WR_TEST(record_refuses_a_file_that_is_not_a_recording)
 {
     FILE *fp = fopen(TMP_PATH, "wb");
-    hm_replay *rp = NULL;
+    wr_replay *rp = NULL;
 
-    HM_ASSERT(fp != NULL);
+    WR_ASSERT(fp != NULL);
     fputs("not a recording\n\n", fp);
     fclose(fp);
 
-    HM_ASSERT_EQ(hm_replay_open(TMP_PATH, &rp), HM_ERR_MALFORMED);
-    HM_ASSERT(rp == NULL);
+    WR_ASSERT_EQ(wr_replay_open(TMP_PATH, &rp), WR_ERR_MALFORMED);
+    WR_ASSERT(rp == NULL);
     remove(TMP_PATH);
 }
 
 /* §5.1's rule for unknown message ids applies to unknown header keys for the
  * same reason: a recording written by a later version must stay readable up to
  * the part this version understands. */
-HM_TEST(record_ignores_a_header_key_it_does_not_know)
+WR_TEST(record_ignores_a_header_key_it_does_not_know)
 {
     FILE *fp = fopen(TMP_PATH, "wb");
-    hm_replay *rp = NULL;
+    wr_replay *rp = NULL;
 
-    HM_ASSERT(fp != NULL);
-    fputs(HM_RECORD_MAGIC "\n"
+    WR_ASSERT(fp != NULL);
+    fputs(WR_RECORD_MAGIC "\n"
           "device_id=future\n"
           "config=0x7e\n"
           "layout_version=1\n"
@@ -362,9 +362,9 @@ HM_TEST(record_ignores_a_header_key_it_does_not_know)
           fp);
     fclose(fp);
 
-    HM_ASSERT_EQ(hm_replay_open(TMP_PATH, &rp), HM_OK);
-    HM_ASSERT_STR(hm_replay_info(rp)->device_id, "future");
-    hm_replay_close(rp);
+    WR_ASSERT_EQ(wr_replay_open(TMP_PATH, &rp), WR_OK);
+    WR_ASSERT_STR(wr_replay_info(rp)->device_id, "future");
+    wr_replay_close(rp);
     remove(TMP_PATH);
 }
 
@@ -374,53 +374,53 @@ HM_TEST(record_ignores_a_header_key_it_does_not_know)
  * rather than a clamp: a clamp would keep decoding a file whose framing is
  * already known to be wrong.
  */
-HM_TEST(record_refuses_a_length_above_the_chunk_maximum_rather_than_clamping)
+WR_TEST(record_refuses_a_length_above_the_chunk_maximum_rather_than_clamping)
 {
     FILE *fp = fopen(TMP_PATH, "wb");
-    hm_replay *rp = NULL;
-    hm_wire_chunk c;
-    uint8_t entry[HM_RECORD_ENTRY_HEADER];
+    wr_replay *rp = NULL;
+    wr_wire_chunk c;
+    uint8_t entry[WR_RECORD_ENTRY_HEADER];
 
-    HM_ASSERT(fp != NULL);
-    fputs(HM_RECORD_MAGIC "\nconfig=0x7e\nbyte_order=little\n\n", fp);
+    WR_ASSERT(fp != NULL);
+    fputs(WR_RECORD_MAGIC "\nconfig=0x7e\nbyte_order=little\n\n", fp);
     memset(entry, 0, sizeof(entry));
-    entry[0] = 0x01u; /* length = 0x00010001, far above HM_WIRE_CHUNK_MAX */
+    entry[0] = 0x01u; /* length = 0x00010001, far above WR_WIRE_CHUNK_MAX */
     entry[2] = 0x01u;
     fwrite(entry, 1, sizeof(entry), fp);
     fclose(fp);
 
-    HM_ASSERT_EQ(hm_replay_open(TMP_PATH, &rp), HM_OK);
-    HM_ASSERT_EQ(hm_replay_next(rp, &c), HM_ERR_MALFORMED);
-    hm_replay_close(rp);
+    WR_ASSERT_EQ(wr_replay_open(TMP_PATH, &rp), WR_OK);
+    WR_ASSERT_EQ(wr_replay_next(rp, &c), WR_ERR_MALFORMED);
+    wr_replay_close(rp);
     remove(TMP_PATH);
 }
 
-HM_TEST(record_reports_a_file_that_ends_mid_chunk)
+WR_TEST(record_reports_a_file_that_ends_mid_chunk)
 {
-    hm_recorder *rec = NULL;
-    hm_replay *rp = NULL;
-    hm_wire_chunk c;
+    wr_recorder *rec = NULL;
+    wr_replay *rp = NULL;
+    wr_wire_chunk c;
     uint8_t payload[40];
     long size;
     FILE *fp;
 
     memset(payload, 0xa5, sizeof(payload));
-    c = make_chunk(HM_WIRE_DEVICE_TO_HOST, 1u, 1000, payload, sizeof(payload));
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, NULL, &rec), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    c = make_chunk(WR_WIRE_DEVICE_TO_HOST, 1u, 1000, payload, sizeof(payload));
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, NULL, &rec), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 
     /* Chop the last ten bytes off — a capture killed mid-write. */
     fp = fopen(TMP_PATH, "rb");
-    HM_ASSERT(fp != NULL);
+    WR_ASSERT(fp != NULL);
     fseek(fp, 0, SEEK_END);
     size = ftell(fp);
     fclose(fp);
     {
         uint8_t *all = (uint8_t *)malloc((size_t)size);
-        HM_ASSERT(all != NULL);
+        WR_ASSERT(all != NULL);
         fp = fopen(TMP_PATH, "rb");
-        HM_ASSERT(fread(all, 1, (size_t)size, fp) == (size_t)size);
+        WR_ASSERT(fread(all, 1, (size_t)size, fp) == (size_t)size);
         fclose(fp);
         fp = fopen(TMP_PATH, "wb");
         fwrite(all, 1, (size_t)size - 10u, fp);
@@ -428,24 +428,24 @@ HM_TEST(record_reports_a_file_that_ends_mid_chunk)
         free(all);
     }
 
-    HM_ASSERT_EQ(hm_replay_open(TMP_PATH, &rp), HM_OK);
-    HM_ASSERT_EQ(hm_replay_next(rp, &c), HM_ERR_TRUNCATED);
-    hm_replay_close(rp);
+    WR_ASSERT_EQ(wr_replay_open(TMP_PATH, &rp), WR_OK);
+    WR_ASSERT_EQ(wr_replay_next(rp, &c), WR_ERR_TRUNCATED);
+    wr_replay_close(rp);
     remove(TMP_PATH);
 }
 
-HM_TEST(record_refuses_a_chunk_longer_than_the_wire_maximum)
+WR_TEST(record_refuses_a_chunk_longer_than_the_wire_maximum)
 {
-    hm_recorder *rec = NULL;
-    hm_wire_chunk c;
+    wr_recorder *rec = NULL;
+    wr_wire_chunk c;
     uint8_t payload[1] = {0x90u};
 
-    c = make_chunk(HM_WIRE_DEVICE_TO_HOST, 1u, 0, payload, 1u);
-    c.length = (uint16_t)(HM_WIRE_CHUNK_MAX + 1u);
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, NULL, &rec), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_ERR_INVALID_ARG);
-    HM_ASSERT_EQ(hm_recorder_chunks(rec), 0u);
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    c = make_chunk(WR_WIRE_DEVICE_TO_HOST, 1u, 0, payload, 1u);
+    c.length = (uint16_t)(WR_WIRE_CHUNK_MAX + 1u);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, NULL, &rec), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_ERR_INVALID_ARG);
+    WR_ASSERT_EQ(wr_recorder_chunks(rec), 0u);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
     remove(TMP_PATH);
 }
 
@@ -454,30 +454,30 @@ HM_TEST(record_refuses_a_chunk_longer_than_the_wire_maximum)
  * back must decode to exactly what the decoder saw live, so a later decode fix
  * can be applied to an old capture (design §5.6, api-request §2.9).
  */
-HM_TEST(record_replays_a_frame_that_decodes_identically_to_the_original_bytes)
+WR_TEST(record_replays_a_frame_that_decodes_identically_to_the_original_bytes)
 {
-    hm_recorder *rec = NULL;
-    hm_replay *rp = NULL;
-    hm_wire_block arm = hm_wire_identity_block(1234u);
-    hm_wire_block palm = hm_wire_identity_block(1293u);
+    wr_recorder *rec = NULL;
+    wr_replay *rp = NULL;
+    wr_wire_block arm = wr_wire_identity_block(1234u);
+    wr_wire_block palm = wr_wire_identity_block(1293u);
     uint8_t buf[128];
     size_t n;
-    hm_wire_chunk c, back;
+    wr_wire_chunk c, back;
 
     arm.gyro[1] = -4096;
     palm.accel[2] = 999;
-    n = hm_wire_notification1(buf, 0x0040u, &arm, &palm);
+    n = wr_wire_notification1(buf, 0x0040u, &arm, &palm);
 
-    c = make_chunk(HM_WIRE_DEVICE_TO_HOST, 1u, 42, buf, n);
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, NULL, &rec), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    c = make_chunk(WR_WIRE_DEVICE_TO_HOST, 1u, 42, buf, n);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, NULL, &rec), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 
-    HM_ASSERT_EQ(hm_replay_open(TMP_PATH, &rp), HM_OK);
-    HM_ASSERT_EQ(hm_replay_next(rp, &back), HM_OK);
-    HM_ASSERT_EQ(back.length, n);
-    HM_ASSERT(memcmp(back.data, buf, n) == 0);
-    hm_replay_close(rp);
+    WR_ASSERT_EQ(wr_replay_open(TMP_PATH, &rp), WR_OK);
+    WR_ASSERT_EQ(wr_replay_next(rp, &back), WR_OK);
+    WR_ASSERT_EQ(back.length, n);
+    WR_ASSERT(memcmp(back.data, buf, n) == 0);
+    wr_replay_close(rp);
     remove(TMP_PATH);
 }
 
@@ -490,38 +490,38 @@ HM_TEST(record_replays_a_frame_that_decodes_identically_to_the_original_bytes)
  * "No evidence" is not "agreement".  A capture with nothing in it must not
  * report zero mismatches, zero suspect norms and zero disagreements as though
  * the specification had been confirmed — every verdict must come back
- * HM_CHECK_NO_EVIDENCE and the unmeasured count must be non-zero.
+ * WR_CHECK_NO_EVIDENCE and the unmeasured count must be non-zero.
  */
-HM_TEST(reconcile_reports_no_evidence_rather_than_agreement_on_an_empty_capture)
+WR_TEST(reconcile_reports_no_evidence_rather_than_agreement_on_an_empty_capture)
 {
-    hm_recorder *rec = NULL;
-    hm_reconcile_report rep;
+    wr_recorder *rec = NULL;
+    wr_reconcile_report rep;
 
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, NULL, &rec), HM_OK);
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, NULL, &rec), WR_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 
     reconcile_file(&rep);
 
-    HM_ASSERT_EQ(rep.chunks, 0u);
-    HM_ASSERT_EQ(hm_reconcile_disagreements(&rep), 0);
+    WR_ASSERT_EQ(rep.chunks, 0u);
+    WR_ASSERT_EQ(wr_reconcile_disagreements(&rep), 0);
     /* ⚠ Every claim, and the COUNT is pinned deliberately: adding a check
      * without deciding what it reports on an empty capture is how a claim ends
      * up silently defaulting to "match". */
-    HM_ASSERT_EQ(hm_reconcile_unmeasured(&rep), 11);
-    HM_ASSERT_EQ(rep.verdict_frame_length, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT_EQ(rep.verdict_quat_norm, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT_EQ(rep.verdict_rate, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT_EQ(rep.verdict_tick_ratio, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT_EQ(rep.verdict_skew, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT_EQ(rep.verdict_bursts, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT_EQ(rep.verdict_palm_is_second_block, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT_EQ(rep.verdict_bringup, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT_EQ(rep.verdict_keepalive, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT_EQ(rep.verdict_history_rate, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT_EQ(rep.verdict_retrieval_continuity, HM_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(wr_reconcile_unmeasured(&rep), 11);
+    WR_ASSERT_EQ(rep.verdict_frame_length, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.verdict_quat_norm, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.verdict_rate, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.verdict_tick_ratio, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.verdict_skew, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.verdict_bursts, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.verdict_palm_is_second_block, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.verdict_bringup, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.verdict_keepalive, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.verdict_history_rate, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.verdict_retrieval_continuity, WR_CHECK_NO_EVIDENCE);
     /* ⚠ And the counts that would otherwise read as clean. */
-    HM_ASSERT_EQ(rep.quat_norm[HM_UNIT_LOWER_ARM].n, 0u);
-    HM_ASSERT_EQ(rep.skew_stored, 0u);
+    WR_ASSERT_EQ(rep.quat_norm[WR_UNIT_LOWER_ARM].n, 0u);
+    WR_ASSERT_EQ(rep.skew_stored, 0u);
     remove(TMP_PATH);
 }
 
@@ -530,52 +530,52 @@ HM_TEST(reconcile_reports_no_evidence_rather_than_agreement_on_an_empty_capture)
  * 799.45 Hz — neither the library's 799.2 seed nor the round 800 — so a fit
  * that recovered a constant instead of a measurement would fail here.
  */
-HM_TEST(reconcile_fits_the_sample_rate_rather_than_adopting_a_constant)
+WR_TEST(reconcile_fits_the_sample_rate_rather_than_adopting_a_constant)
 {
     synth_options o = synth_defaults();
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     write_synthetic(&o);
     reconcile_file(&rep);
 
-    HM_ASSERT_EQ(rep.verdict_rate, HM_CHECK_MATCH);
-    HM_ASSERT(rep.fit.observations > 300);
-    HM_ASSERT_NEAR(rep.fitted_rate_hz, SYNTH_RATE_HZ, 0.05);
+    WR_ASSERT_EQ(rep.verdict_rate, WR_CHECK_MATCH);
+    WR_ASSERT(rep.fit.observations > 300);
+    WR_ASSERT_NEAR(rep.fitted_rate_hz, SYNTH_RATE_HZ, 0.05);
     /* ⚠ And it is not the seed and not the round number. */
-    HM_ASSERT(fabs(rep.fitted_rate_hz - HM_NOMINAL_SAMPLE_RATE_HZ) > 0.1);
-    HM_ASSERT(rep.ppm_vs_800 < -600.0);
-    HM_ASSERT((rep.fit.flags & HM_CLOCK_SHORT_BASELINE) == 0u);
-    HM_ASSERT((rep.fit.flags & HM_CLOCK_DEGENERATE) == 0u);
+    WR_ASSERT(fabs(rep.fitted_rate_hz - WR_NOMINAL_SAMPLE_RATE_HZ) > 0.1);
+    WR_ASSERT(rep.ppm_vs_800 < -600.0);
+    WR_ASSERT((rep.fit.flags & WR_CLOCK_SHORT_BASELINE) == 0u);
+    WR_ASSERT((rep.fit.flags & WR_CLOCK_DEGENERATE) == 0u);
     remove(TMP_PATH);
 }
 
 /* §6.5's ratio and §6.4's derived tick rate, both recovered from the frames. */
-HM_TEST(reconcile_recovers_the_tick_ratio_and_the_derived_tick_rate)
+WR_TEST(reconcile_recovers_the_tick_ratio_and_the_derived_tick_rate)
 {
     synth_options o = synth_defaults();
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     write_synthetic(&o);
     reconcile_file(&rep);
 
-    HM_ASSERT(rep.tick_ratio_fitted[HM_UNIT_LOWER_ARM]);
-    HM_ASSERT(rep.tick_ratio_fitted[HM_UNIT_PALM]);
-    HM_ASSERT_NEAR(rep.ticks_per_index[HM_UNIT_LOWER_ARM], SYNTH_TICK_RATIO, 0.01);
-    HM_ASSERT_NEAR(rep.ticks_per_index[HM_UNIT_PALM], SYNTH_TICK_RATIO, 0.01);
+    WR_ASSERT(rep.tick_ratio_fitted[WR_UNIT_LOWER_ARM]);
+    WR_ASSERT(rep.tick_ratio_fitted[WR_UNIT_PALM]);
+    WR_ASSERT_NEAR(rep.ticks_per_index[WR_UNIT_LOWER_ARM], SYNTH_TICK_RATIO, 0.01);
+    WR_ASSERT_NEAR(rep.ticks_per_index[WR_UNIT_PALM], SYNTH_TICK_RATIO, 0.01);
     /* §6.4: ≈64,068 ticks/s, four sessions spanning 64,025-64,088. */
-    HM_ASSERT_NEAR(rep.tick_rate_hz, 64068.0, 100.0);
-    HM_ASSERT_EQ(rep.verdict_tick_ratio, HM_CHECK_MATCH);
+    WR_ASSERT_NEAR(rep.tick_rate_hz, 64068.0, 100.0);
+    WR_ASSERT_EQ(rep.verdict_tick_ratio, WR_CHECK_MATCH);
     /* ⚠ Every point in the stream, not two endpoints — see the test below. */
-    HM_ASSERT_EQ(rep.tick_fit_n, rep.records_live);
-    HM_ASSERT(rep.rel_rate_measured);
-    HM_ASSERT_NEAR(rep.rel_rate_ppm, 0.0, 2.0);
+    WR_ASSERT_EQ(rep.tick_fit_n, rep.records_live);
+    WR_ASSERT(rep.rel_rate_measured);
+    WR_ASSERT_NEAR(rep.rel_rate_ppm, 0.0, 2.0);
     remove(TMP_PATH);
 }
 
 /*
  * ⚠⚠ THE FIRST REAL CAPTURE REPORTED THIS CLAIM AS A VIOLATION, AND IT WAS NOT.
  *
- * The reconciliation used hm_tick_unwrapper's own `ratio` as the measurement.
+ * The reconciliation used wr_tick_unwrapper's own `ratio` as the measurement.
  * That is a two-endpoint fit refitted on doubling, and it exists to predict a
  * tick value well enough to pick the right wrap out of a ±32,768 budget — a job
  * a 350 ppm error still does perfectly.  Read as a precision instrument it put
@@ -591,23 +591,23 @@ HM_TEST(reconcile_recovers_the_tick_ratio_and_the_derived_tick_rate)
  * which is zero iff the two counters run at one rate, and it carries a standard
  * error because a ppm figure without one cannot test a claim stated in ppm.
  */
-HM_TEST(reconcile_measures_the_tick_ratio_itself_not_the_unwrappers_working_estimate)
+WR_TEST(reconcile_measures_the_tick_ratio_itself_not_the_unwrappers_working_estimate)
 {
     synth_options o = synth_defaults();
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     o.records = 1200;
     write_synthetic(&o);
     reconcile_file(&rep);
 
     /* The fit uses every live record, not two endpoints. */
-    HM_ASSERT_EQ(rep.tick_fit_n, 1200u);
-    HM_ASSERT(rep.rel_rate_measured);
+    WR_ASSERT_EQ(rep.tick_fit_n, 1200u);
+    WR_ASSERT(rep.rel_rate_measured);
     /* Both counters advance at exactly one rate here, so the slope is zero and
      * the estimate must land on it well inside §6.5's claim. */
-    HM_ASSERT(fabs(rep.rel_rate_ppm) < HM_ONE_RATE_CLAIM_PPM);
-    HM_ASSERT(rep.rel_rate_ppm_sigma < HM_ONE_RATE_CLAIM_PPM);
-    HM_ASSERT_EQ(rep.verdict_tick_ratio, HM_CHECK_MATCH);
+    WR_ASSERT(fabs(rep.rel_rate_ppm) < WR_ONE_RATE_CLAIM_PPM);
+    WR_ASSERT(rep.rel_rate_ppm_sigma < WR_ONE_RATE_CLAIM_PPM);
+    WR_ASSERT_EQ(rep.verdict_tick_ratio, WR_CHECK_MATCH);
     remove(TMP_PATH);
 }
 
@@ -621,21 +621,21 @@ HM_TEST(reconcile_measures_the_tick_ratio_itself_not_the_unwrappers_working_esti
  * That is the same error as reading zero mismatches out of zero samples as
  * agreement, and it gets the same answer: no evidence.
  */
-HM_TEST(reconcile_refuses_to_confirm_two_ppm_from_a_capture_that_cannot_resolve_it)
+WR_TEST(reconcile_refuses_to_confirm_two_ppm_from_a_capture_that_cannot_resolve_it)
 {
     synth_options o = synth_defaults();
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     o.records = 60;           /* a short baseline ... */
     o.palm_tick_jitter = 6;   /* ... and a real residual spread on the difference */
     write_synthetic(&o);
     reconcile_file(&rep);
 
-    HM_ASSERT(rep.rel_rate_measured);
-    HM_ASSERT(rep.rel_rate_ppm_sigma > HM_ONE_RATE_CLAIM_PPM);
+    WR_ASSERT(rep.rel_rate_measured);
+    WR_ASSERT(rep.rel_rate_ppm_sigma > WR_ONE_RATE_CLAIM_PPM);
     /* ⚠ Not MATCH, and not DIFFERS.  The capture simply cannot say. */
-    HM_ASSERT_EQ(rep.verdict_tick_ratio, HM_CHECK_NO_EVIDENCE);
-    HM_ASSERT(hm_reconcile_unmeasured(&rep) > 0);
+    WR_ASSERT_EQ(rep.verdict_tick_ratio, WR_CHECK_NO_EVIDENCE);
+    WR_ASSERT(wr_reconcile_unmeasured(&rep) > 0);
     remove(TMP_PATH);
 }
 
@@ -644,48 +644,48 @@ HM_TEST(reconcile_refuses_to_confirm_two_ppm_from_a_capture_that_cannot_resolve_
  * ever says "no evidence" is not a check.  Two counters genuinely running at
  * different rates show up as a non-zero slope well clear of its own sigma.
  */
-HM_TEST(reconcile_still_catches_two_counters_that_genuinely_drift_apart)
+WR_TEST(reconcile_still_catches_two_counters_that_genuinely_drift_apart)
 {
-    hm_recording_info info = hm_recording_info_default();
-    hm_recorder *rec = NULL;
-    hm_reconcile_report rep;
+    wr_recording_info info = wr_recording_info_default();
+    wr_recorder *rec = NULL;
+    wr_reconcile_report rep;
     uint8_t buf[128];
     uint32_t seq = 0u, index = 0u;
-    hm_time_us t0 = 1000000;
+    wr_time_us t0 = 1000000;
     size_t n;
-    hm_wire_chunk c;
+    wr_wire_chunk c;
 
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, &info, &rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, &info, &rec), WR_OK);
     {
-        uint8_t start[3] = {0xa0u, 0x01u, HM_CONFIG_OBSERVED_DEFAULT};
-        c = make_chunk(HM_WIRE_HOST_TO_DEVICE, seq++, t0, start, 3u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        uint8_t start[3] = {0xa0u, 0x01u, WR_CONFIG_OBSERVED_DEFAULT};
+        c = make_chunk(WR_WIRE_HOST_TO_DEVICE, seq++, t0, start, 3u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
     }
     for (int i = 0; i < 1200; ++i) {
         /* The palm counter runs 100 ppm fast — 50× §6.5's claim, and still a
          * number no per-sample inspection would ever show you. */
         double palm_ticks = (double)index * SYNTH_TICK_RATIO * 1.0001 + SYNTH_SKEW_TICKS;
-        hm_wire_block arm = hm_wire_identity_block(ticks_for(index, 0));
-        hm_wire_block palm =
-            hm_wire_identity_block((uint16_t)((uint64_t)(palm_ticks + 0.5) & 0xffffu));
-        hm_time_us t = t0 + (hm_time_us)((double)index * 1e6 / SYNTH_RATE_HZ + 0.5);
+        wr_wire_block arm = wr_wire_identity_block(ticks_for(index, 0));
+        wr_wire_block palm =
+            wr_wire_identity_block((uint16_t)((uint64_t)(palm_ticks + 0.5) & 0xffffu));
+        wr_time_us t = t0 + (wr_time_us)((double)index * 1e6 / SYNTH_RATE_HZ + 0.5);
 
-        n = hm_wire_notification1(buf, (uint16_t)index, &arm, &palm);
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        n = wr_wire_notification1(buf, (uint16_t)index, &arm, &palm);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
         index += 32u;
     }
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 
     reconcile_file(&rep);
-    HM_ASSERT(rep.rel_rate_measured);
-    HM_ASSERT_NEAR(rep.rel_rate_ppm, 100.0, 5.0);
-    HM_ASSERT_EQ(rep.verdict_tick_ratio, HM_CHECK_DIFFERS);
+    WR_ASSERT(rep.rel_rate_measured);
+    WR_ASSERT_NEAR(rep.rel_rate_ppm, 100.0, 5.0);
+    WR_ASSERT_EQ(rep.verdict_tick_ratio, WR_CHECK_DIFFERS);
     /* ⚠ And the skew must show it too — the two halves can no longer agree,
      * which is the cross-check that exposed the estimator bug in the first
      * place.  A drift the ratio check caught and the skew check missed would
      * mean one of them had stopped working. */
-    HM_ASSERT_EQ(rep.verdict_skew, HM_CHECK_DIFFERS);
+    WR_ASSERT_EQ(rep.verdict_skew, WR_CHECK_DIFFERS);
     remove(TMP_PATH);
 }
 
@@ -694,21 +694,21 @@ HM_TEST(reconcile_still_catches_two_counters_that_genuinely_drift_apart)
  * is why the reconciler keeps the values rather than reducing them to a running
  * median: you cannot split a session you did not keep.
  */
-HM_TEST(reconcile_recovers_the_inter_unit_skew_and_checks_it_across_both_halves)
+WR_TEST(reconcile_recovers_the_inter_unit_skew_and_checks_it_across_both_halves)
 {
     synth_options o = synth_defaults();
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     write_synthetic(&o);
     reconcile_file(&rep);
 
-    HM_ASSERT_EQ(rep.skew_stored, rep.skew_total);
-    HM_ASSERT(rep.skew_stored > 300u);
-    HM_ASSERT_NEAR(rep.skew_median_ticks, (double)SYNTH_SKEW_TICKS, 1.0);
-    HM_ASSERT_NEAR(rep.skew_median_first_half, rep.skew_median_second_half, 1.0);
-    HM_ASSERT_EQ(rep.verdict_skew, HM_CHECK_MATCH);
+    WR_ASSERT_EQ(rep.skew_stored, rep.skew_total);
+    WR_ASSERT(rep.skew_stored > 300u);
+    WR_ASSERT_NEAR(rep.skew_median_ticks, (double)SYNTH_SKEW_TICKS, 1.0);
+    WR_ASSERT_NEAR(rep.skew_median_first_half, rep.skew_median_second_half, 1.0);
+    WR_ASSERT_EQ(rep.verdict_skew, WR_CHECK_MATCH);
     /* 59 ticks at ≈64,068 ticks/s is 0.92 ms. */
-    HM_ASSERT_NEAR(rep.skew_median_us, 921.0, 20.0);
+    WR_ASSERT_NEAR(rep.skew_median_us, 921.0, 20.0);
     remove(TMP_PATH);
 }
 
@@ -717,41 +717,41 @@ HM_TEST(reconcile_recovers_the_inter_unit_skew_and_checks_it_across_both_halves)
  * swapped, which produces a plausible but MIRRORED wrist angle that every
  * ordinary plausibility check passes.  The reconciliation must call it.
  */
-HM_TEST(reconcile_detects_two_unit_blocks_that_have_been_swapped)
+WR_TEST(reconcile_detects_two_unit_blocks_that_have_been_swapped)
 {
     synth_options o = synth_defaults();
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     write_synthetic(&o);
     reconcile_file(&rep);
-    HM_ASSERT_EQ(rep.verdict_palm_is_second_block, HM_CHECK_MATCH);
-    HM_ASSERT(rep.accel_palm_minus_arm_fast.n > 300u);
+    WR_ASSERT_EQ(rep.verdict_palm_is_second_block, WR_CHECK_MATCH);
+    WR_ASSERT(rep.accel_palm_minus_arm_fast.n > 300u);
     /* §6.4 measured 31-51 m/s² more across five golf swings. */
-    HM_ASSERT_NEAR(rep.accel_palm_minus_arm_fast.mean, 49.0, 1.0);
+    WR_ASSERT_NEAR(rep.accel_palm_minus_arm_fast.mean, 49.0, 1.0);
 
     /* Now the same session with the blocks the wrong way round. */
     o.arm_accel = 8000;
     o.palm_accel = 3000;
     write_synthetic(&o);
     reconcile_file(&rep);
-    HM_ASSERT_EQ(rep.verdict_palm_is_second_block, HM_CHECK_DIFFERS);
-    HM_ASSERT(rep.accel_palm_minus_arm_fast.mean < 0.0);
+    WR_ASSERT_EQ(rep.verdict_palm_is_second_block, WR_CHECK_DIFFERS);
+    WR_ASSERT(rep.accel_palm_minus_arm_fast.mean < 0.0);
     remove(TMP_PATH);
 }
 
 /* ⚠ And it must report NO EVIDENCE, not agreement, when nothing in the capture
  * rotated fast enough to separate the two units. */
-HM_TEST(reconcile_will_not_identify_the_palm_from_a_capture_with_no_motion)
+WR_TEST(reconcile_will_not_identify_the_palm_from_a_capture_with_no_motion)
 {
     synth_options o = synth_defaults();
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     o.gyro = 0;
     write_synthetic(&o);
     reconcile_file(&rep);
 
-    HM_ASSERT_EQ(rep.accel_palm_minus_arm_fast.n, 0u);
-    HM_ASSERT_EQ(rep.verdict_palm_is_second_block, HM_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.accel_palm_minus_arm_fast.n, 0u);
+    WR_ASSERT_EQ(rep.verdict_palm_is_second_block, WR_CHECK_NO_EVIDENCE);
     remove(TMP_PATH);
 }
 
@@ -761,23 +761,23 @@ HM_TEST(reconcile_will_not_identify_the_palm_from_a_capture_with_no_motion)
  * +32 and is §6.6's own stationary row — which confirms nothing and
  * contradicts nothing.
  */
-HM_TEST(reconcile_separates_a_dense_burst_from_a_stationary_session)
+WR_TEST(reconcile_separates_a_dense_burst_from_a_stationary_session)
 {
     synth_options o = synth_defaults();
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     write_synthetic(&o);
     reconcile_file(&rep);
-    HM_ASSERT_EQ(rep.step[HM_STEP_DENSE], 0u);
-    HM_ASSERT(rep.step[HM_STEP_32] > 300u);
-    HM_ASSERT_EQ(rep.verdict_bursts, HM_CHECK_NOTE);
+    WR_ASSERT_EQ(rep.step[WR_STEP_DENSE], 0u);
+    WR_ASSERT(rep.step[WR_STEP_32] > 300u);
+    WR_ASSERT_EQ(rep.verdict_bursts, WR_CHECK_NOTE);
 
     o.dense_run = 8; /* §6.6 measured a run of eight consecutive steps of 1 */
     write_synthetic(&o);
     reconcile_file(&rep);
-    HM_ASSERT_EQ(rep.step[HM_STEP_DENSE], 8u);
-    HM_ASSERT_EQ(rep.verdict_bursts, HM_CHECK_MATCH);
-    HM_ASSERT(rep.dense_fraction > 0.0);
+    WR_ASSERT_EQ(rep.step[WR_STEP_DENSE], 8u);
+    WR_ASSERT_EQ(rep.verdict_bursts, WR_CHECK_MATCH);
+    WR_ASSERT(rep.dense_fraction > 0.0);
     remove(TMP_PATH);
 }
 
@@ -788,32 +788,32 @@ HM_TEST(reconcile_separates_a_dense_burst_from_a_stationary_session)
  * times carry no information, and ~4,000 bulk arrivals fed into the fit would
  * wreck the rate while every frame still parsed.
  */
-HM_TEST(reconcile_keeps_bracketed_history_records_out_of_the_clock_fit)
+WR_TEST(reconcile_keeps_bracketed_history_records_out_of_the_clock_fit)
 {
-    hm_recorder *rec = NULL;
-    hm_reconcile_report rep;
+    wr_recorder *rec = NULL;
+    wr_reconcile_report rep;
     uint8_t buf[128];
     uint32_t seq = 0u;
-    hm_time_us t = 1000000;
+    wr_time_us t = 1000000;
     size_t n;
-    hm_wire_chunk c;
+    wr_wire_chunk c;
     int i;
 
     /* A short live stream, then a bracket full of records that all arrive at
      * once — the shape a real retrieval has (§7.3: ~260 notifications/s). */
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, NULL, &rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, NULL, &rec), WR_OK);
     {
-        uint8_t start[3] = {0xa0u, 0x01u, HM_CONFIG_OBSERVED_DEFAULT};
-        c = make_chunk(HM_WIRE_HOST_TO_DEVICE, seq++, t, start, 3u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        uint8_t start[3] = {0xa0u, 0x01u, WR_CONFIG_OBSERVED_DEFAULT};
+        c = make_chunk(WR_WIRE_HOST_TO_DEVICE, seq++, t, start, 3u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
     }
     for (i = 0; i < 200; ++i) {
-        hm_wire_block arm = hm_wire_identity_block(ticks_for((uint32_t)i * 32u, 0));
-        hm_wire_block palm = hm_wire_identity_block(ticks_for((uint32_t)i * 32u, SYNTH_SKEW_TICKS));
-        n = hm_wire_notification1(buf, (uint16_t)(i * 32), &arm, &palm);
-        t = 1000000 + (hm_time_us)((double)(i * 32) * 1e6 / SYNTH_RATE_HZ + 0.5);
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        wr_wire_block arm = wr_wire_identity_block(ticks_for((uint32_t)i * 32u, 0));
+        wr_wire_block palm = wr_wire_identity_block(ticks_for((uint32_t)i * 32u, SYNTH_SKEW_TICKS));
+        n = wr_wire_notification1(buf, (uint16_t)(i * 32), &arm, &palm);
+        t = 1000000 + (wr_time_us)((double)(i * 32) * 1e6 / SYNTH_RATE_HZ + 0.5);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
     }
 
     {
@@ -823,37 +823,37 @@ HM_TEST(reconcile_keeps_bracketed_history_records_out_of_the_clock_fit)
         uint8_t lead[2] = {0xa1u, 0x01u};
         uint8_t open[2] = {0xa1u, 0x02u};
         uint8_t close[2] = {0xa1u, 0x01u};
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, lead, 2u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, open, 2u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, lead, 2u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, open, 2u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
 
         for (i = 0; i < 500; ++i) {
             /* Indices BEHIND live, all arriving in a few milliseconds. */
-            hm_wire_block arm = hm_wire_identity_block(ticks_for((uint32_t)i, 0));
-            hm_wire_block palm = hm_wire_identity_block(ticks_for((uint32_t)i, SYNTH_SKEW_TICKS));
-            n = hm_wire_notification1(buf, (uint16_t)i, &arm, &palm);
-            c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t + i * 4, buf, n);
-            HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+            wr_wire_block arm = wr_wire_identity_block(ticks_for((uint32_t)i, 0));
+            wr_wire_block palm = wr_wire_identity_block(ticks_for((uint32_t)i, SYNTH_SKEW_TICKS));
+            n = wr_wire_notification1(buf, (uint16_t)i, &arm, &palm);
+            c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t + i * 4, buf, n);
+            WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
         }
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t + 2000, close, 2u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t + 2000, close, 2u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
     }
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 
     reconcile_file(&rep);
 
-    HM_ASSERT_EQ(rep.records_live, 200u);
-    HM_ASSERT_EQ(rep.records_history, 500u);
+    WR_ASSERT_EQ(rep.records_live, 200u);
+    WR_ASSERT_EQ(rep.records_history, 500u);
     /* ⚠ The fit saw the 200 live frames and NONE of the 500 history ones. */
-    HM_ASSERT_EQ(rep.fit.observations, 200);
-    HM_ASSERT_EQ(rep.brackets_opened, 1u);
-    HM_ASSERT_EQ(rep.brackets_closed, 1u);
+    WR_ASSERT_EQ(rep.fit.observations, 200);
+    WR_ASSERT_EQ(rep.brackets_opened, 1u);
+    WR_ASSERT_EQ(rep.brackets_closed, 1u);
     /* The leading `a1 01` was not counted as closing anything of ours. */
-    HM_ASSERT_NEAR(rep.fitted_rate_hz, SYNTH_RATE_HZ, 0.5);
+    WR_ASSERT_NEAR(rep.fitted_rate_hz, SYNTH_RATE_HZ, 0.5);
     /* And the history records still contributed their skew, which needs no
      * unwrapper and works from the very first record of a stream (§10.3). */
-    HM_ASSERT_EQ(rep.skew_stored, 700u);
+    WR_ASSERT_EQ(rep.skew_stored, 700u);
 
     remove(TMP_PATH);
 }
@@ -863,10 +863,10 @@ HM_TEST(reconcile_keeps_bracketed_history_records_out_of_the_clock_fit)
  * these bits change the WIRE FORMAT (§6.2), so a decoder told the wrong one
  * produces a differently-shaped payload silently misparsed.
  */
-HM_TEST(reconcile_takes_the_configuration_from_the_recorded_start_command)
+WR_TEST(reconcile_takes_the_configuration_from_the_recorded_start_command)
 {
     synth_options o = synth_defaults();
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     /* ⚠ A header that claims 0x5e — 20-byte blocks, no tick counter — while the
      * wire carries `a0 01 7e`.  Believing the header would size every record
@@ -876,30 +876,30 @@ HM_TEST(reconcile_takes_the_configuration_from_the_recorded_start_command)
     write_synthetic(&o);
     reconcile_file(&rep);
 
-    HM_ASSERT(rep.config_from_stream);
-    HM_ASSERT_EQ(rep.config.bits, HM_CONFIG_OBSERVED_DEFAULT);
-    HM_ASSERT_EQ(rep.expected_len_one_record, 47u);
-    HM_ASSERT_EQ(rep.expected_len_two_records, 93u);
-    HM_ASSERT_EQ(rep.notif_other_len, 0u);
-    HM_ASSERT_EQ(rep.verdict_frame_length, HM_CHECK_MATCH);
+    WR_ASSERT(rep.config_from_stream);
+    WR_ASSERT_EQ(rep.config.bits, WR_CONFIG_OBSERVED_DEFAULT);
+    WR_ASSERT_EQ(rep.expected_len_one_record, 47u);
+    WR_ASSERT_EQ(rep.expected_len_two_records, 93u);
+    WR_ASSERT_EQ(rep.notif_other_len, 0u);
+    WR_ASSERT_EQ(rep.verdict_frame_length, WR_CHECK_MATCH);
     remove(TMP_PATH);
 }
 
 /* §9.1's sequence, and §9.2's mandatory keepalive. */
-HM_TEST(reconcile_reads_the_bringup_sequence_and_the_keepalive_gap)
+WR_TEST(reconcile_reads_the_bringup_sequence_and_the_keepalive_gap)
 {
     synth_options o = synth_defaults();
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     write_synthetic(&o);
     reconcile_file(&rep);
-    HM_ASSERT_EQ(rep.bringup_len, 8u);
-    HM_ASSERT(rep.bringup_matches_vendor);
-    HM_ASSERT_EQ(rep.verdict_bringup, HM_CHECK_MATCH);
-    HM_ASSERT_EQ(rep.status_polls, 2u); /* §9.1 sends `81` twice */
+    WR_ASSERT_EQ(rep.bringup_len, 8u);
+    WR_ASSERT(rep.bringup_matches_vendor);
+    WR_ASSERT_EQ(rep.verdict_bringup, WR_CHECK_MATCH);
+    WR_ASSERT_EQ(rep.status_polls, 2u); /* §9.1 sends `81` twice */
     /* ⚠ The bring-up bytes only; the start command that follows is not part of
      * §9.1's sequence and must not be appended to it. */
-    HM_ASSERT_EQ(rep.bringup[7], 0x85u);
+    WR_ASSERT_EQ(rep.bringup[7], 0x85u);
 
     /* A 50-minute session polling `0x81` every 30 s, which is what §9.2
      * measured surviving 7 minutes where a silent connection died at 5.0. */
@@ -909,8 +909,8 @@ HM_TEST(reconcile_reads_the_bringup_sequence_and_the_keepalive_gap)
     o.keepalive_period_us = 30 * 1000 * 1000;
     write_synthetic(&o);
     reconcile_file(&rep);
-    HM_ASSERT_EQ(rep.verdict_keepalive, HM_CHECK_MATCH);
-    HM_ASSERT(rep.status_polls > 90u);
+    WR_ASSERT_EQ(rep.verdict_keepalive, WR_CHECK_MATCH);
+    WR_ASSERT(rep.status_polls > 90u);
 
     /* ⚠ The same session polling every 60 s.  §9.2 is measured, not advisory:
      * the vendor app polls every 30 s and the device drops a connection that
@@ -919,16 +919,16 @@ HM_TEST(reconcile_reads_the_bringup_sequence_and_the_keepalive_gap)
     o.keepalive_period_us = 60 * 1000 * 1000;
     write_synthetic(&o);
     reconcile_file(&rep);
-    HM_ASSERT_EQ(rep.verdict_keepalive, HM_CHECK_DIFFERS);
-    HM_ASSERT(rep.max_host_write_gap_us > 33 * 1000 * 1000);
+    WR_ASSERT_EQ(rep.verdict_keepalive, WR_CHECK_DIFFERS);
+    WR_ASSERT(rep.max_host_write_gap_us > 33 * 1000 * 1000);
 
     /* ⚠ And one write is not evidence of a keepalive, in either direction. */
     o.keepalive_period_us = 0;
     o.records = 20;
     write_synthetic(&o);
     reconcile_file(&rep);
-    HM_ASSERT_EQ(rep.host_writes, 1u);
-    HM_ASSERT_EQ(rep.verdict_keepalive, HM_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.host_writes, 1u);
+    WR_ASSERT_EQ(rep.verdict_keepalive, WR_CHECK_NO_EVIDENCE);
     remove(TMP_PATH);
 }
 
@@ -941,40 +941,40 @@ HM_TEST(reconcile_reads_the_bringup_sequence_and_the_keepalive_gap)
  */
 static void write_retrieval(uint32_t step, int16_t gyro_raw, int records)
 {
-    hm_recorder *rec = NULL;
+    wr_recorder *rec = NULL;
     uint8_t buf[128];
     uint32_t seq = 0u, index = 1000u;
-    hm_time_us t = 1000000;
-    hm_wire_chunk c;
+    wr_time_us t = 1000000;
+    wr_wire_chunk c;
     size_t n;
 
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, NULL, &rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, NULL, &rec), WR_OK);
     {
-        uint8_t start[3] = {0xa0u, 0x01u, HM_CONFIG_OBSERVED_DEFAULT};
-        c = make_chunk(HM_WIRE_HOST_TO_DEVICE, seq++, t, start, 3u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        uint8_t start[3] = {0xa0u, 0x01u, WR_CONFIG_OBSERVED_DEFAULT};
+        c = make_chunk(WR_WIRE_HOST_TO_DEVICE, seq++, t, start, 3u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
     }
     {
         uint8_t open[2] = {0xa1u, 0x02u};
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, open, 2u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, open, 2u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
     }
     for (int i = 0; i < records; ++i) {
-        hm_wire_block arm = hm_wire_identity_block(ticks_for(index, 0));
-        hm_wire_block palm = hm_wire_identity_block(ticks_for(index, SYNTH_SKEW_TICKS));
+        wr_wire_block arm = wr_wire_identity_block(ticks_for(index, 0));
+        wr_wire_block palm = wr_wire_identity_block(ticks_for(index, SYNTH_SKEW_TICKS));
         arm.gyro[0] = gyro_raw;
         palm.gyro[0] = gyro_raw;
-        n = hm_wire_notification1(buf, (uint16_t)index, &arm, &palm);
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t + i * 4, buf, n);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        n = wr_wire_notification1(buf, (uint16_t)index, &arm, &palm);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t + i * 4, buf, n);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
         index += step;
     }
     {
         uint8_t close[2] = {0xa1u, 0x01u};
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t + 5000, close, 2u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t + 5000, close, 2u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
     }
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 }
 
 /*
@@ -997,53 +997,53 @@ static void write_retrieval(uint32_t step, int16_t gyro_raw, int records)
  * certify a full-rate path nobody exercised; not a failure, which would blame
  * the device for the bench.
  */
-HM_TEST(reconcile_will_not_certify_the_full_rate_path_from_a_stationary_retrieval)
+WR_TEST(reconcile_will_not_certify_the_full_rate_path_from_a_stationary_retrieval)
 {
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     /* 8000 raw / 8 = 1000 °/s would be fast; this is 1.0 °/s — a desk. */
     write_retrieval(8u, 8, 400);
     reconcile_file(&rep);
 
-    HM_ASSERT_EQ(rep.records_history, 400u);
-    HM_ASSERT_EQ(rep.history_modal_step, 8u);
-    HM_ASSERT(!rep.history_exercised_full_rate);
-    HM_ASSERT_EQ(rep.verdict_history_rate, HM_CHECK_NO_EVIDENCE);
+    WR_ASSERT_EQ(rep.records_history, 400u);
+    WR_ASSERT_EQ(rep.history_modal_step, 8u);
+    WR_ASSERT(!rep.history_exercised_full_rate);
+    WR_ASSERT_EQ(rep.verdict_history_rate, WR_CHECK_NO_EVIDENCE);
     /* ⚠ And it must not be quietly folded into the disagreement count. */
-    HM_ASSERT_EQ(hm_reconcile_disagreements(&rep), 0);
-    HM_ASSERT(hm_reconcile_unmeasured(&rep) > 0);
+    WR_ASSERT_EQ(wr_reconcile_disagreements(&rep), 0);
+    WR_ASSERT(wr_reconcile_unmeasured(&rep) > 0);
     remove(TMP_PATH);
 }
 
 /* The other half: a retrieval over real motion returns step 1, and THAT is
  * what demonstrates the full-rate path §7.6's whole premise rests on. */
-HM_TEST(reconcile_certifies_the_full_rate_path_from_a_retrieval_over_fast_motion)
+WR_TEST(reconcile_certifies_the_full_rate_path_from_a_retrieval_over_fast_motion)
 {
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     /* 8000 counts / 8 = 1000 °/s, in §7.3's step-1 band of 780-850 and above. */
     write_retrieval(1u, 8000, 400);
     reconcile_file(&rep);
 
-    HM_ASSERT_EQ(rep.history_modal_step, 1u);
-    HM_ASSERT(rep.history_exercised_full_rate);
-    HM_ASSERT(rep.history_peak_gyro_dps > 900.0);
-    HM_ASSERT_EQ(rep.verdict_history_rate, HM_CHECK_MATCH);
+    WR_ASSERT_EQ(rep.history_modal_step, 1u);
+    WR_ASSERT(rep.history_exercised_full_rate);
+    WR_ASSERT(rep.history_peak_gyro_dps > 900.0);
+    WR_ASSERT_EQ(rep.verdict_history_rate, WR_CHECK_MATCH);
     remove(TMP_PATH);
 }
 
 /* §7.3's two falsifiable claims: across 17,739 measured steps none exceeded 8
  * and none was 0.  A step of 32 in a retrieval would break the first. */
-HM_TEST(reconcile_flags_a_history_step_above_the_documented_floor)
+WR_TEST(reconcile_flags_a_history_step_above_the_documented_floor)
 {
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     write_retrieval(32u, 8000, 400);
     reconcile_file(&rep);
 
-    HM_ASSERT(rep.history_step_count[9] > 0u);
-    HM_ASSERT_EQ(rep.verdict_history_rate, HM_CHECK_DIFFERS);
-    HM_ASSERT(hm_reconcile_disagreements(&rep) > 0);
+    WR_ASSERT(rep.history_step_count[9] > 0u);
+    WR_ASSERT_EQ(rep.verdict_history_rate, WR_CHECK_DIFFERS);
+    WR_ASSERT(wr_reconcile_disagreements(&rep) > 0);
     remove(TMP_PATH);
 }
 
@@ -1061,50 +1061,50 @@ HM_TEST(reconcile_flags_a_history_step_above_the_documented_floor)
  * one line per stream is wrong across a retrieval, and the clock fit reports
  * itself DEGENERATE with 1.7 s residuals rather than misaligning quietly.
  */
-HM_TEST(reconcile_detects_the_sample_counter_stalling_across_a_retrieval)
+WR_TEST(reconcile_detects_the_sample_counter_stalling_across_a_retrieval)
 {
-    hm_recorder *rec = NULL;
-    hm_reconcile_report rep;
+    wr_recorder *rec = NULL;
+    wr_reconcile_report rep;
     uint8_t buf[128];
     uint32_t seq = 0u, index = 0u;
-    hm_time_us t = 1000000;
-    hm_wire_chunk c;
+    wr_time_us t = 1000000;
+    wr_wire_chunk c;
     size_t n;
     int i;
 
-    HM_ASSERT_EQ(hm_recorder_open(TMP_PATH, NULL, &rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_open(TMP_PATH, NULL, &rec), WR_OK);
     {
-        uint8_t start[3] = {0xa0u, 0x01u, HM_CONFIG_OBSERVED_DEFAULT};
-        c = make_chunk(HM_WIRE_HOST_TO_DEVICE, seq++, t, start, 3u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        uint8_t start[3] = {0xa0u, 0x01u, WR_CONFIG_OBSERVED_DEFAULT};
+        c = make_chunk(WR_WIRE_HOST_TO_DEVICE, seq++, t, start, 3u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
     }
     /* 200 live records, then a bracket, then 200 more.  ⚠ Across the bracket
      * the TICKS advance by 350 ms worth and the INDEX does not — which is what
      * the device did. */
     for (i = 0; i < 200; ++i) {
-        hm_wire_block arm = hm_wire_identity_block(ticks_for(index, 0));
-        hm_wire_block palm = hm_wire_identity_block(ticks_for(index, SYNTH_SKEW_TICKS));
-        n = hm_wire_notification1(buf, (uint16_t)index, &arm, &palm);
-        t = 1000000 + (hm_time_us)((double)index * 1e6 / SYNTH_RATE_HZ + 0.5);
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        wr_wire_block arm = wr_wire_identity_block(ticks_for(index, 0));
+        wr_wire_block palm = wr_wire_identity_block(ticks_for(index, SYNTH_SKEW_TICKS));
+        n = wr_wire_notification1(buf, (uint16_t)index, &arm, &palm);
+        t = 1000000 + (wr_time_us)((double)index * 1e6 / SYNTH_RATE_HZ + 0.5);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
         index += 32u;
     }
     {
         uint8_t open_m[2] = {0xa1u, 0x02u};
         uint8_t close_m[2] = {0xa1u, 0x01u};
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, open_m, 2u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, open_m, 2u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
         for (i = 0; i < 100; ++i) {
-            hm_wire_block a2 = hm_wire_identity_block(ticks_for((uint32_t)i, 0));
-            hm_wire_block p2 = hm_wire_identity_block(ticks_for((uint32_t)i, SYNTH_SKEW_TICKS));
-            n = hm_wire_notification1(buf, (uint16_t)i, &a2, &p2);
-            c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t + i, buf, n);
-            HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+            wr_wire_block a2 = wr_wire_identity_block(ticks_for((uint32_t)i, 0));
+            wr_wire_block p2 = wr_wire_identity_block(ticks_for((uint32_t)i, SYNTH_SKEW_TICKS));
+            n = wr_wire_notification1(buf, (uint16_t)i, &a2, &p2);
+            c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t + i, buf, n);
+            WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
         }
         t += 350000;
-        c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, close_m, 2u);
-        HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+        c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, close_m, 2u);
+        WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
     }
     /* ⚠ The stall: 350 ms of ticks, ~22,400 at 64,068 ticks/s, and the index
      * moves on by one ordinary live step instead of ~280. */
@@ -1112,52 +1112,52 @@ HM_TEST(reconcile_detects_the_sample_counter_stalling_across_a_retrieval)
         uint32_t tick_base = (uint32_t)(80.166 * (double)index) + 22424u;
         for (i = 0; i < 200; ++i) {
             uint32_t off = (uint32_t)(80.166 * 32.0 * (double)i);
-            hm_wire_block arm = hm_wire_identity_block((uint16_t)((tick_base + off) & 0xffffu));
-            hm_wire_block palm =
-                hm_wire_identity_block((uint16_t)((tick_base + off + SYNTH_SKEW_TICKS) & 0xffffu));
+            wr_wire_block arm = wr_wire_identity_block((uint16_t)((tick_base + off) & 0xffffu));
+            wr_wire_block palm =
+                wr_wire_identity_block((uint16_t)((tick_base + off + SYNTH_SKEW_TICKS) & 0xffffu));
             index += 32u;
-            n = hm_wire_notification1(buf, (uint16_t)index, &arm, &palm);
+            n = wr_wire_notification1(buf, (uint16_t)index, &arm, &palm);
             t += 40000;
-            c = make_chunk(HM_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
-            HM_ASSERT_EQ(hm_recorder_write(rec, &c, 1u), HM_OK);
+            c = make_chunk(WR_WIRE_DEVICE_TO_HOST, seq++, t, buf, n);
+            WR_ASSERT_EQ(wr_recorder_write(rec, &c, 1u), WR_OK);
         }
     }
-    HM_ASSERT_EQ(hm_recorder_close(rec), HM_OK);
+    WR_ASSERT_EQ(wr_recorder_close(rec), WR_OK);
 
     reconcile_file(&rep);
-    HM_ASSERT_EQ(rep.retrievals_measured, 1u);
-    HM_ASSERT_EQ(rep.retrievals_stalled, 1u);
-    HM_ASSERT_EQ(rep.verdict_retrieval_continuity, HM_CHECK_DIFFERS);
+    WR_ASSERT_EQ(rep.retrievals_measured, 1u);
+    WR_ASSERT_EQ(rep.retrievals_stalled, 1u);
+    WR_ASSERT_EQ(rep.verdict_retrieval_continuity, WR_CHECK_DIFFERS);
     /*
      * ⚠ THE CLAIM IS THAT THE GAP EQUALS THE PULL, so the fraction is what is
      * asserted.  The absolute figure carries the one live step that measures it
      * (32 indices, 40 ms) and the synthetic's own tick rounding; pinning it to
      * the millisecond would be pinning the fixture, not the property.
      */
-    HM_ASSERT_NEAR(rep.retrieval_stall_fraction.mean, 1.0, 0.3);
-    HM_ASSERT(rep.retrieval_stall_ms.mean > 250.0);
-    HM_ASSERT(rep.retrieval_indices_lost.mean > 200.0);
+    WR_ASSERT_NEAR(rep.retrieval_stall_fraction.mean, 1.0, 0.3);
+    WR_ASSERT(rep.retrieval_stall_ms.mean > 250.0);
+    WR_ASSERT(rep.retrieval_indices_lost.mean > 200.0);
     /* Cumulative, because that is the figure that reaches a wrap boundary.
      * ⚠ One real stall measured ~23,500 ticks — 72% of the ±32,768 that decides
      * a wrap, where a pull-free gap uses 12 — so a single pull spends most of
      * the budget and two in one live-frame gap exceed it (§10.2). */
-    HM_ASSERT(rep.stall_total_ticks > 15000.0);
-    HM_ASSERT_NEAR(rep.stall_worst_ticks, rep.stall_total_ticks, 1.0);
+    WR_ASSERT(rep.stall_total_ticks > 15000.0);
+    WR_ASSERT_NEAR(rep.stall_worst_ticks, rep.stall_total_ticks, 1.0);
     remove(TMP_PATH);
 }
 
 /* The other side: a retrieval that does NOT stall must not be reported as one,
  * or the check would fire on every capture and stop meaning anything. */
-HM_TEST(reconcile_does_not_invent_a_stall_where_the_counter_kept_running)
+WR_TEST(reconcile_does_not_invent_a_stall_where_the_counter_kept_running)
 {
-    hm_reconcile_report rep;
+    wr_reconcile_report rep;
 
     /* write_retrieval() brackets records whose ticks and indices stay in step. */
     write_retrieval(1u, 8000, 200);
     reconcile_file(&rep);
-    HM_ASSERT_EQ(rep.retrievals_stalled, 0u);
-    HM_ASSERT(rep.verdict_retrieval_continuity != HM_CHECK_DIFFERS);
+    WR_ASSERT_EQ(rep.retrievals_stalled, 0u);
+    WR_ASSERT(rep.verdict_retrieval_continuity != WR_CHECK_DIFFERS);
     remove(TMP_PATH);
 }
 
-HM_TEST_MAIN()
+WR_TEST_MAIN()

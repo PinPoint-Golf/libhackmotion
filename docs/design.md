@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (C) 2026 Mark Liversedge -->
-# libhackmotion — library design
+# libwrist — library design
 
-This document is the design of `libhackmotion`, a C library for HackMotion
+This document is the design of `libwrist`, a C library for HackMotion
 wrist sensors. It describes the library as built, and is the working resource
 a developer implements against.
 
@@ -73,8 +73,8 @@ its coverage.
 - **Any network anything.** The library reaches a local BLE peripheral and stops
   there.
 
-**The one thing on the boundary that is in.** `hm_quat_relative()` and
-`hm_relative_angle_deg()` — the relative rotation `q_palm ⊗ q_arm*` and its
+**The one thing on the boundary that is in.** `wr_quat_relative()` and
+`wr_relative_angle_deg()` — the relative rotation `q_palm ⊗ q_arm*` and its
 angle. These are decode facts rather than analysis choices: the composition
 order is a property of the wire format (§6.7), getting it wrong corrupts every
 consumer identically, and the angle is what the calibration *presence* check is
@@ -109,7 +109,7 @@ match. §4.6 covers this.
    └───────────────────────────────────────────────────────────────┘
                                  ▲
    ┌───────────────────────────────────────────────────────────────┐
-   │ 1.  hackmotion — the core.  No sockets, no threads, no timers,│
+   │ 1.  wrist — the core.  No sockets, no threads, no timers,│
    │     no sleep, no clock, no file I/O, no logging it chose      │
    │     itself.  Links libm and nothing else.                     │
    │                                                               │
@@ -157,57 +157,57 @@ That inverts the usual shape and it is the reason the stop barrier is free.
 
 ```c
 /* IN — from the host's transport, on the session thread */
-void hm_session_on_link_up(hm_session*, int32_t negotiated_mtu, hm_time_us now_us);
-void hm_session_on_link_down(hm_session*, hm_link_down_cause, hm_time_us now_us);
-void hm_session_on_bytes(hm_session*, const uint8_t*, size_t, hm_time_us host_recv_us);
-void hm_session_on_advertising_seen(hm_session*, hm_time_us now_us);
+void wr_session_on_link_up(wr_session*, int32_t negotiated_mtu, wr_time_us now_us);
+void wr_session_on_link_down(wr_session*, wr_link_down_cause, wr_time_us now_us);
+void wr_session_on_bytes(wr_session*, const uint8_t*, size_t, wr_time_us host_recv_us);
+void wr_session_on_advertising_seen(wr_session*, wr_time_us now_us);
 
 /* CLOCK — the host owns the timer */
-hm_time_us hm_session_next_due_us(const hm_session*);
-void       hm_session_tick(hm_session*, hm_time_us now_us);
+wr_time_us wr_session_next_due_us(const wr_session*);
+void       wr_session_tick(wr_session*, wr_time_us now_us);
 
 /* OUT — drained by the host, never pushed into it */
-size_t hm_session_poll_writes(hm_session*, hm_write_request*, size_t);
-size_t hm_session_poll_events (hm_session*, hm_event*,        size_t);
-size_t hm_session_poll_live   (hm_session*, hm_sample*,       size_t);
-size_t hm_session_poll_wire   (hm_session*, hm_wire_chunk*,   size_t);
+size_t wr_session_poll_writes(wr_session*, wr_write_request*, size_t);
+size_t wr_session_poll_events (wr_session*, wr_event*,        size_t);
+size_t wr_session_poll_live   (wr_session*, wr_sample*,       size_t);
+size_t wr_session_poll_wire   (wr_session*, wr_wire_chunk*,   size_t);
 ```
 
 A complete integration, in the shape PinPoint described:
 
 ```c
 /* on QLowEnergyService::characteristicChanged */
-hm_session_on_bytes(s, (const uint8_t*)v.constData(), (size_t)v.size(), now_us());
+wr_session_on_bytes(s, (const uint8_t*)v.constData(), (size_t)v.size(), now_us());
 pump();
 
 /* on the QTimer */
-hm_session_tick(s, now_us());
+wr_session_tick(s, now_us());
 pump();
 
 static void pump(void) {
-    hm_write_request w[8];
-    size_t n = hm_session_poll_writes(s, w, 8);
+    wr_write_request w[8];
+    size_t n = wr_session_poll_writes(s, w, 8);
     for (size_t i = 0; i < n; ++i)
         service->writeCharacteristic(chr, QByteArray((const char*)w[i].data, w[i].length),
             w[i].without_response ? WriteWithoutResponse : WriteWithResponse);
 
-    hm_sample live[256];
-    while ((n = hm_session_poll_live(s, live, 256)) > 0) ring.push(live, n);
+    wr_sample live[256];
+    while ((n = wr_session_poll_live(s, live, 256)) > 0) ring.push(live, n);
 
-    hm_event ev[64];
-    while ((n = hm_session_poll_events(s, ev, 64)) > 0) for (size_t i=0;i<n;++i) handle(ev[i]);
+    wr_event ev[64];
+    while ((n = wr_session_poll_events(s, ev, 64)) > 0) for (size_t i=0;i<n;++i) handle(ev[i]);
 
-    timer->start(msUntil(hm_session_next_due_us(s)));
+    timer->start(msUntil(wr_session_next_due_us(s)));
 }
 ```
 
-`hm_session_next_due_us()` must be re-read after every call into the session.
-It returns `HM_TIME_NEVER` when nothing is pending, and a host may then sleep
+`wr_session_next_due_us()` must be re-read after every call into the session.
+It returns `WR_TIME_NEVER` when nothing is pending, and a host may then sleep
 until transport traffic wakes it.
 
 ### 3.2.1 ⚠ One call, one notification — and why not a byte stream
 
-**`hm_session_on_bytes()` takes one complete ATT notification payload.** It is
+**`wr_session_on_bytes()` takes one complete ATT notification payload.** It is
 not a stream and the library does not reassemble one. It is the kind of choice
 that is free now and a class of silent corruption later.
 
@@ -216,7 +216,7 @@ Three reasons, in increasing order of severity:
 1. **Every stack preserves the boundary.** One `QByteArray` per
    `characteristicChanged`, one D-Bus signal or socket read on BlueZ, one
    `didUpdateValueForCharacteristic` on CoreBluetooth.
-2. **The MTU floor guarantees it is sufficient.** `HM_MIN_ATT_MTU` is 96
+2. **The MTU floor guarantees it is sufficient.** `WR_MIN_ATT_MTU` is 96
    precisely so the 93-byte maximum message fits in one notification (§2.4).
    Having enforced that floor, the library is entitled to rely on it.
 3. **⚠ The alternative is unimplementable in its failure case.** §3 gives the
@@ -236,22 +236,22 @@ reports an error.
 **So the record count comes from the length and never from the content:**
 
 ```
-count = (length − 1) / hm_stream_config_record_size(cfg)     /* 46 or 42 */
+count = (length − 1) / wr_stream_config_record_size(cfg)     /* 46 or 42 */
 ```
 
 - A payload that is not a whole number of records raises
-  `HM_WARN_TRAILING_BYTES`. That is the signature of a coalescing transport, and
+  `WR_WARN_TRAILING_BYTES`. That is the signature of a coalescing transport, and
   the right response is to be loud on the first frame rather than absorb it.
   There is deliberately **no coalescing mode**: a mode nobody exercises is worse
   than a warning everybody sees.
 - More records than §6.3 describes are decoded and reported
-  (`HM_WARN_UNEXPECTED_RECORD_COUNT`) rather than silently truncated.
+  (`WR_WARN_UNEXPECTED_RECORD_COUNT`) rather than silently truncated.
 - **The norm check survives as what §6.4 offers it as** — evidence that the
-  decode is *aligned* — reported on the sample (`HM_SAMPLE_QUAT_NORM_SUSPECT`)
+  decode is *aligned* — reported on the sample (`WR_SAMPLE_QUAT_NORM_SUSPECT`)
   and as a warning, and never acted on.
 
 Freed from framing duty, the tolerance could tighten to what the evidence
-supports: **`HM_QUAT_NORM_TOLERANCE` went from 512 counts to 64**, against a
+supports: **`WR_QUAT_NORM_TOLERANCE` went from 512 counts to 64**, against a
 measured spread of ±0.41 over 6,064 records. 64 is still over 150× the observed
 spread, so a correct frame can never trip it, while a decode misaligned by one
 byte now does — which `codec_norm_tolerance_catches_a_one_byte_shift` asserts
@@ -265,7 +265,7 @@ property, and in this shape the second is a consequence of the first rather than
 a promise about it:
 
 - The library has no thread and no callback, so there is no producer to stop.
-- `hm_session_close()` marks the session closed, seals the four queues, and
+- `wr_session_close()` marks the session closed, seals the four queues, and
   returns. Nothing can be produced afterwards because nothing produces anything
   except a call the host itself makes.
 - Destroying a ring, a file handle or a closure is safe from that instant.
@@ -279,26 +279,26 @@ the threading contract.
 Three rules, and they cover everything:
 
 1. **The session owns nothing the caller did not give it, except history
-   blocks.** `hm_session_config.memory` carries caller-provided rings for live
+   blocks.** `wr_session_config.memory` carries caller-provided rings for live
    samples, events, wire chunks, the history gather area and the coverage
-   intervals. ⚠ `hm_session_create()` makes **exactly one** allocation whatever
+   intervals. ⚠ `wr_session_create()` makes **exactly one** allocation whatever
    the caller supplies — the session object itself has to live somewhere — and
-   `hm_session_destroy()` makes exactly one free. Providing every ring does not
+   `wr_session_destroy()` makes exactly one free. Providing every ring does not
    reach zero; it reaches one, of a fixed and knowable size. Nothing allocates
    after create.
 2. **A history block is an allocation, and it is the caller's.** It outlives the
    session, moves to another thread, and is freed with
-   `hm_history_block_release()`. Supply `hm_allocator` to route those through a
+   `wr_history_block_release()`. Supply `wr_allocator` to route those through a
    pool.
 3. **Everything else is by value.** Samples, events, write requests, clock
    snapshots and wire chunks are POD with no pointers.
 
-Rings are drop-oldest with a counter: `hm_session_dropped_live()`,
+Rings are drop-oldest with a counter: `wr_session_dropped_live()`,
 `_dropped_events()`, `_dropped_wire()`. A host that is not keeping up must be
-able to see it, so loss is counted rather than silent, and `hm_event.sequence`
+able to see it, so loss is counted rather than silent, and `wr_event.sequence`
 gaps show the same thing for events.
 
-**Sizing.** `HM_LIVE_RING_RECOMMENDED` is 2048 samples. ⚠ Do not size it from a
+**Sizing.** `WR_LIVE_RING_RECOMMENDED` is 2048 samples. ⚠ Do not size it from a
 rate: §6.6 measures dense bursts reaching index step 1 — the full ≈799.2 Hz — in
 *every* session containing motion, so there is no live ceiling. Size it from how
 often the host drains.
@@ -320,13 +320,13 @@ looks like a sensor fault. The epoch is arbitrary and never interpreted.
 This also makes an entire session deterministic under a synthetic clock, which
 is what the history-path tests of §10.4 need.
 
-`HM_TIME_UNKNOWN` (`INT64_MIN`) marks a timestamp that is *structurally*
+`WR_TIME_UNKNOWN` (`INT64_MIN`) marks a timestamp that is *structurally*
 unavailable — the arrival instant of a history record, for instance, which
 carries no information at all (§10.1). It is not a null; it is a statement.
 
 ### 4.2 One sample type
 
-`hm_sample` serves live and history alike, rather than splitting out a separate
+`wr_sample` serves live and history alike, rather than splitting out a separate
 history type. One type is better for three reasons:
 
 - A POD array with a documented, versioned layout is what a consumer needs. One
@@ -337,7 +337,7 @@ history type. One type is better for three reasons:
   `source`, and whether `host_recv_us` means anything — is a field.
 
 ```c
-typedef struct hm_sample {
+typedef struct wr_sample {
     uint64_t   stream_id;         /* which a0 01 7e this index space belongs to */
     uint32_t   sample_index;      /* UNWRAPPED; monotonic within a stream */
     uint16_t   sample_index_raw;
@@ -347,13 +347,13 @@ typedef struct hm_sample {
     uint8_t    config_bits;       /* the a0 01 <cfg> byte that produced this */
     uint8_t    reserved0;
     int32_t    skew_us;           /* palm − lower_arm */
-    hm_time_us host_time_us;      /* MAPPED through the fit */
-    hm_time_us host_recv_us;      /* arrival; UNKNOWN for history */
+    wr_time_us host_time_us;      /* MAPPED through the fit */
+    wr_time_us host_recv_us;      /* arrival; UNKNOWN for history */
     uint32_t   precision_us;      /* link jitter + extrapolation — GATE ON THIS */
     uint32_t   uncertainty_us;    /* precision + the uncorrected systematic (§6.4) */
-    hm_unit_sample lower_arm;     /* wire block 0 */
-    hm_unit_sample palm;          /* wire block 1 */
-} hm_sample;
+    wr_unit_sample lower_arm;     /* wire block 0 */
+    wr_unit_sample palm;          /* wire block 1 */
+} wr_sample;
 ```
 
 192 bytes as built, 72 of them per unit — about 675 KB for a 4.5 s window, which
@@ -367,7 +367,7 @@ the palm, and the wiring fixes it. A consumer that swaps them produces a
 plausible-looking wrist angle that is simply **mirrored**, and every
 plausibility check passes.
 
-So the API offers `s.lower_arm` and `s.palm`, and `hm_sample_unit(s, unit)` for
+So the API offers `s.lower_arm` and `s.palm`, and `wr_sample_unit(s, unit)` for
 generic code. There is no `unit[2]` to index wrongly.
 
 **There is deliberately no aggregate.** §6.4: the units sit 3–8 cm apart, so
@@ -380,7 +380,7 @@ exactly why the wrist metrics are built from orientation.
 
 ### 4.4 Raw counts are authoritative
 
-`hm_unit_sample` carries both `int16` counts and scaled floats. The counts are
+`wr_unit_sample` carries both `int16` counts and scaled floats. The counts are
 the record; the floats are a convenience computed under `config_bits`.
 
 The reason is the *selector*, not the scale: the gyro divisor is 8 or
@@ -393,8 +393,8 @@ reading ≈0 at rest. Anything called `accel` will be misread by someone.
 
 ### 4.4.1 The configuration carries its own justification
 
-`hm_stream_config_nonstandard(bits, justification)` **copies** the string into
-the config, and `hm_history_block` carries a `hm_stream_config` by value — so the
+`wr_stream_config_nonstandard(bits, justification)` **copies** the string into
+the config, and `wr_history_block` carries a `wr_stream_config` by value — so the
 reason travels with the samples it describes and lands in the capture's
 provenance without anything else having to route it.
 
@@ -409,8 +409,8 @@ gave a reason is more useful than one that is silent about it.
 
 ### 4.5 Errors
 
-`hm_status`: non-negative is success (`HM_OK`, `HM_PENDING`, `HM_DONE`), negative
-is failure. Test `st < HM_OK`, never `st != HM_OK`.
+`wr_status`: non-negative is success (`WR_OK`, `WR_PENDING`, `WR_DONE`), negative
+is failure. Test `st < WR_OK`, never `st != WR_OK`.
 
 The library does not have an error *string* channel. Anything with detail is an
 event, because an event is POD, queued, timestamped and loggable, and because a
@@ -420,29 +420,29 @@ string in a C API is a lifetime question nobody wants.
 causes — a request before any stream ran, a reversed range, a null request, the
 full index space, and indices from a previous session — and **every one returned
 the same code**. So the wire cannot classify and the library must, from its own
-state. `HM_EV_DEVICE_ERROR` reports the raw code; the *meaningful* status lands
-on the history block (`HM_HIST_NO_STREAM`, `HM_HIST_EVICTED`, …) from what the
+state. `WR_EV_DEVICE_ERROR` reports the raw code; the *meaningful* status lands
+on the history block (`WR_HIST_NO_STREAM`, `WR_HIST_EVICTED`, …) from what the
 session knows.
 
 ### 4.6 ABI and bindings
 
 - Opaque handle + POD structs + flat C functions. No callbacks in any hot path.
-- `hm_abi_sizes_get()` reports every public struct's size as the library was
-  built; `hm_abi_check()` compares a binding's expectation and fails at load
+- `wr_abi_sizes_get()` reports every public struct's size as the library was
+  built; `wr_abi_check()` compares a binding's expectation and fails at load
   rather than at random.
-- `HM_SAMPLE_LAYOUT_VERSION` and `hm_history_block.sample_stride` let a
+- `WR_SAMPLE_LAYOUT_VERSION` and `wr_history_block.sample_stride` let a
   persisted capture stay decodable when the struct grows.
-- Reserved fields exist in `hm_sample` and `hm_history_block` so the first
+- Reserved fields exist in `wr_sample` and `wr_history_block` so the first
   additions do not move anything.
 - No global state. Multiple independent sessions may exist in one process.
 
-An optional header-only C++ RAII wrapper (`hackmotion.hpp`) is planned; it adds
+An optional header-only C++ RAII wrapper (`wrist.hpp`) is planned; it adds
 no ABI and nobody is required to use it.
 
 #### 4.6.1 What the first binding taught us — ✅ phase 6
 
-`python/hackmotion` is the first consumer of any of the above, and it found that
-**`hm_abi_check()` is necessary and nowhere near sufficient.** It compares nine
+`python/wrist` is the first consumer of any of the above, and it found that
+**`wr_abi_check()` is necessary and nowhere near sufficient.** It compares nine
 struct *sizes*. It says nothing about where the fields inside them sit, and
 nothing about any enumerator — so a binding whose `skew_us` is one slot out
 passes the guard, decodes every sample, and returns plausible numbers with no
@@ -452,20 +452,20 @@ Two things close it, and they are layered because neither is complete alone:
 
 | | What it catches | What it cannot see |
 |---|---|---|
-| `hmwire abi` — sizes, field offsets and enumerator values read out of the compiler by `offsetof`, compared both ways against the binding (`tests/test_python_abi.py`) | any field moved, resized, added or dropped on either side; any enum value transcribed wrong | a field carved out of an existing `reserved` array and updated in neither the table nor the binding |
-| `hm_abi_check()` at binding load | a library built from different headers than the binding was written against, **on a user's machine** | field offsets; enums; struct sizes outside its nine |
+| `wrwire abi` — sizes, field offsets and enumerator values read out of the compiler by `offsetof`, compared both ways against the binding (`tests/test_python_abi.py`) | any field moved, resized, added or dropped on either side; any enum value transcribed wrong | a field carved out of an existing `reserved` array and updated in neither the table nor the binding |
+| `wr_abi_check()` at binding load | a library built from different headers than the binding was written against, **on a user's machine** | field offsets; enums; struct sizes outside its nine |
 
 ⚠ **The offset table is hand-written and its own completeness is bounded, in
-writing.** `tools/hm_abi_table.c` requires its rows to *tile* each struct, which
+writing.** `tools/wr_abi_table.c` requires its rows to *tile* each struct, which
 catches an appended or mis-sized row — but a dropped row whose bytes are
 indistinguishable from padding is invisible to any offset-based check, because
-the information is not in the layout. Removing `hm_sample.skew_us` (an `int32`
+the information is not in the layout. Removing `wr_sample.skew_us` (an `int32`
 before an 8-aligned field) leaves exactly the padding that would have been there
 anyway; it was tried. The struct-size comparison is what actually catches that,
 and the field-name comparison catches it again. All three are documented at the
 top of that file with what each one misses.
 
-⚠ **And a binding adds one hazard C does not have.** A `hm_history_block` owns
+⚠ **And a binding adds one hazard C does not have.** A `wr_history_block` owns
 its samples; in ctypes that is a raw address, and a view kept past the release
 returns plausible sample data. **A sanitizer does not see it** — ASan instruments
 the code it compiled, and a ctypes read happens inside CPython, which it did not.
@@ -494,13 +494,13 @@ reason about.
 |---|---|---|
 | `DOWN` | No link | Calibration → `UNCALIBRATED`; stream → `STOPPED`; fit sealed |
 | `BRINGUP` | Link up, MTU accepted, §9.1 sequence running | Queue the bring-up commands; arm the bring-up watchdog |
-| `READY` | Bring-up complete | Emit `HM_EV_READY`; start the keepalive |
-| `CLOSED` | `hm_session_close()` called | Seal all queues |
+| `READY` | Bring-up complete | Emit `WR_EV_READY`; start the keepalive |
+| `CLOSED` | `wr_session_close()` called | Seal all queues |
 
 | Transition | Trigger | Notes |
 |---|---|---|
 | `DOWN → BRINGUP` | `on_link_up(mtu ≥ 96)` | |
-| `DOWN → DOWN` | `on_link_up(0 < mtu < 96)` | ⚠ Emit `HM_EV_MTU_REJECTED` and refuse to run — see §5.2 |
+| `DOWN → DOWN` | `on_link_up(0 < mtu < 96)` | ⚠ Emit `WR_EV_MTU_REJECTED` and refuse to run — see §5.2 |
 | `BRINGUP → READY` | `0x80` seen (the only required step) and the rest either answered or timed out | |
 | `BRINGUP → DOWN` | bring-up watchdog (10 s) | Classify per §5.4 |
 | any `→ DOWN` | `on_link_down` | ⚠ Always invalidates calibration |
@@ -523,7 +523,7 @@ read-only — so the library cannot ensure this. It checks:
 | `negotiated_mtu` | Behaviour |
 |---|---|
 | `≥ 96` | Proceed |
-| `1 … 95` | ⚠ `HM_EV_MTU_REJECTED` carrying the value; the session refuses to run |
+| `1 … 95` | ⚠ `WR_EV_MTU_REJECTED` carrying the value; the session refuses to run |
 | `0` | "The platform will not tell me": warn and proceed |
 
 Failing loudly beats truncated frames that parse as garbage on whichever
@@ -557,7 +557,7 @@ resets the timer is a **host→device write**, not motion and not data flowing t
 other way.
 
 So the library polls `0x81` every 30 s, unconditionally, for the whole
-connection, from `READY` onward. `hm_session_policy.keepalive_period_us` clamps
+connection, from `READY` onward. `wr_session_policy.keepalive_period_us` clamps
 to `(0, 60 s]` and 0 selects 30 s. **There is no way to switch it off.** The
 battery reading is incidental.
 
@@ -606,15 +606,15 @@ shows the user a spinner for a problem only they can fix.
 
 | Evidence | `advice` |
 |---|---|
-| We called `hm_session_power_off()` | `DO_NOT_RETRY` |
-| We called `hm_session_close()` | `DO_NOT_RETRY` |
+| We called `wr_session_power_off()` | `DO_NOT_RETRY` |
+| We called `wr_session_close()` | `DO_NOT_RETRY` |
 | Cause is `CONNECTION_TAKEN` | `NEEDS_OTHER_APP_CLOSED` |
 | Idle ≥ 4.5 min, or clean remote close after a long quiet | `NEEDS_BUTTON_PRESS` |
 | `on_advertising_seen()` within the last few seconds | `RECONNECT_WITH_BACKOFF` |
 | Otherwise | `RECONNECT_WITH_BACKOFF`, with a suggested delay |
 
 The library **advises**; the host reconnects, because the host owns the radio.
-`hm_link_down_event.suggested_retry_delay_us` carries an exponential backoff the
+`wr_link_down_event.suggested_retry_delay_us` carries an exponential backoff the
 host may use or ignore: reconnect competes for an adapter the application's own
 pool arbitrates, so it has to stay the application's.
 
@@ -633,8 +633,8 @@ reconnecting, strap untouched and never removed.
 | `RUNNING` | Frames arriving; the clock fit is live |
 | `STOPPING` | `83` queued |
 
-`hm_session_start_stream()` allocates a new `stream_id`, resets the index and
-tick unwrappers, and calls `hm_fit_begin_stream()` — which folds the finished
+`wr_session_start_stream()` allocates a new `stream_id`, resets the index and
+tick unwrappers, and calls `wr_fit_begin_stream()` — which folds the finished
 stream's rate into the connection-pooled estimate and throws the index space
 away (§6.3).
 
@@ -643,10 +643,10 @@ restarting first among the five silent ways capture goes wrong: it clears the
 buffer, resets the index space, and starts the clock fit from nothing — and
 whether it also costs the calibration is untested, where a *disconnect*
 demonstrably does. If a stream is ever restarted, that is
-`HM_EV_STREAM_RESTARTED`, not an implementation detail.
+`WR_EV_STREAM_RESTARTED`, not an implementation detail.
 
 **Teardown.** `83` stops cleanly; disconnecting also stops the stream.
-`hm_session_power_off()` writes `fa`, after which ⚠ **no acknowledgement arrives
+`wr_session_power_off()` writes `fa`, after which ⚠ **no acknowledgement arrives
 and the link stays up for about 9 seconds** (§9.3). The session enters a linger
 state, expects the gap, does not read it as failure and does not retry into it.
 
@@ -668,21 +668,21 @@ one cannot, because it has already discarded the bytes the fix would have
 interpreted differently.
 
 The core does no file I/O. It copies chunks into a caller-supplied
-`hm_wire_chunk` ring and the host drains them with `hm_session_poll_wire()`.
+`wr_wire_chunk` ring and the host drains them with `wr_session_poll_wire()`.
 Each chunk carries direction, host time, a sequence number and up to 256 bytes.
 Supplying no ring disables the log and costs nothing.
 
 ⚠ MAC (`0x85`) and serial (`0x86`) replies are **redacted** in the log unless
 `policy.record_identifiers` is set, and redaction is marked with
-`HM_WIRE_REDACTED` so a reader knows something was removed rather than absent.
+`WR_WIRE_REDACTED` so a reader knows something was removed rather than absent.
 
-The optional `hackmotion_record` target writes chunks to a versioned container
-and replays them back through `hm_session_on_bytes()` under a synthetic clock.
+The optional `wrist_record` target writes chunks to a versioned container
+and replays them back through `wr_session_on_bytes()` under a synthetic clock.
 A text header so `file(1)` and a human can identify it, then fixed-size
 length-prefixed records. **Implemented; this is the format, not a sketch.**
 
 ```
-HMWIRE1\n
+WRWIRE1\n
 device_id=<opaque>\n
 config=0x7e\n              (or `config=legacy` — the `82` start has no byte)
 layout_version=1\n
@@ -696,7 +696,7 @@ identifiers=redacted\n
 Three things settled during implementation, each because leaving it implicit
 would have cost something:
 
-- ⚠ **`sequence` is carried, not renumbered.** `HM_WIRE_LOST` says chunks were dropped before this one but not *how
+- ⚠ **`sequence` is carried, not renumbered.** `WR_WIRE_LOST` says chunks were dropped before this one but not *how
   many*, so a reader renumbering from its own ordinal would turn a lossy
   recording into a complete-looking one — the exact shape of "no evidence read
   as agreement" that §10.2's tests exist to prevent. Twenty bytes per record,
@@ -708,7 +708,7 @@ would have cost something:
 - **An unknown header key is ignored, a malformed known one is an error** — the
   same rule §5.1 gives for unknown message ids, for the same reason.
 
-`hmwire reconcile` reads a capture back against this specification claim by
+`wrwire reconcile` reads a capture back against this specification claim by
 claim: framing, `|q|`, the fitted rate against 799.2 *and* against 800, the tick
 ratio and the two units' agreement, the skew across both halves of the session,
 §6.6's step distribution, §6.3's palm-identification check, §9.1's bring-up and
@@ -717,14 +717,14 @@ evidence**, and the third is never folded into the first.
 
 ### 5.7 Timers
 
-`hm_session_next_due_us()` is the minimum of whichever of these are armed:
+`wr_session_next_due_us()` is the minimum of whichever of these are armed:
 
 | Deadline | Armed when | §  |
 |---|---|---|
 | keepalive | `READY` onward, always | 9.2 |
 | bring-up watchdog | `BRINGUP` | 9.1 |
-| stream-start watchdog, 3 s | `STARTING`; expiry → `STOPPED` + `HM_WARN_STREAM_START_TIMEOUT` | 6.1 |
-| stream-stop watchdog, 3 s | `STOPPING`; expiry → `STOPPED` + `HM_WARN_STREAM_STOP_TIMEOUT`. ⚠ Same knob as the row above — one round trip, one measurement (§6.1's 50–80 ms). ⚠ Without it this would be the only device-facing wait in the table with no way out, and a device that dropped the `83` would wedge the session silently and permanently | 6.1 |
+| stream-start watchdog, 3 s | `STARTING`; expiry → `STOPPED` + `WR_WARN_STREAM_START_TIMEOUT` | 6.1 |
+| stream-stop watchdog, 3 s | `STOPPING`; expiry → `STOPPED` + `WR_WARN_STREAM_STOP_TIMEOUT`. ⚠ Same knob as the row above — one round trip, one measurement (§6.1's 50–80 ms). ⚠ Without it this would be the only device-facing wait in the table with no way out, and a device that dropped the `83` would wedge the session silently and permanently | 6.1 |
 | calibration raise limit | `OBSERVING_RAISE` | 8.2, client policy |
 | calibration device bound | `MARKING_POSE0`, `MARKING_POSE1`, `APPLYING` — a marker's reply or the result | 8.2 |
 | calibration presence window, 2 s | a presence run is collecting live samples | 8.2 |
@@ -732,9 +732,9 @@ evidence**, and the third is never folded into the first.
 | history request deadline | a request in flight or queued | 7.4 |
 | history eviction warning | a queued request | 7.3 |
 | clock event period, 1 s | fit has observations | 10 |
-| keepalive alarm, 120 s | no host→device write for that long → `HM_WARN_KEEPALIVE_LATE` | 9.2 |
+| keepalive alarm, 120 s | no host→device write for that long → `WR_WARN_KEEPALIVE_LATE` | 9.2 |
 | live-gap alarm, 3 s | streaming and no live frame; ⚠ suppressed inside a bracket | 10.1 |
-| pinned report, 1 s | pinned count rose since the last report → `HM_EV_PINNED_SAMPLES` | 6.4 |
+| pinned report, 1 s | pinned count rose since the last report → `WR_EV_PINNED_SAMPLES` | 6.4 |
 | power-off linger | `fa` written | 9.3 |
 | bracket limit, 15 s | a history bracket is open, or an `a1` is out with no `a1 02` yet. ⚠ **The real bound on the write quiet period**, and it was missing from this table — see §5.4 | 7.5 |
 
@@ -784,7 +784,7 @@ session rather than advice:
 
 ⚠ **The whole-session fit fails loudly, and that is worth keeping.** Fitting the
 44.5 s six-pull capture as one segment returned **768 Hz against a true 801**,
-and the lower-envelope estimator reported itself `HM_CLOCK_DEGENERATE` with
+and the lower-envelope estimator reported itself `WR_CLOCK_DEGENERATE` with
 **1.7 s residuals** rather than misaligning quietly. A consumer that fits per
 segment and compares segments has a consistency check; one that fits the whole
 session and trusts the number does not. §10.2's `worst_margin` is the other half
@@ -799,7 +799,7 @@ of the same alarm.
 
 **Index.** Monotonic within a stream (§6.5), so the *unsigned* 16-bit difference
 is the true step and wraps take care of themselves for any gap under 82 s. A
-step above `HM_INDEX_REGRESSION_LIMIT` (49152) is counted as suspect and
+step above `WR_INDEX_REGRESSION_LIMIT` (49152) is counted as suspect and
 reported; the sample is still delivered.
 
 **Ticks.** §10.2's algorithm, encoded once:
@@ -820,7 +820,7 @@ involved**, which is why it works identically for history.
 worst-case error 2,745 ticks against the ±32,768 budget, 8.4%, zero failures.
 `tests/test_unwrap.c` reproduces it at the same scale and additionally forces a
 5-second hole — nearly five tick wraps — which is the case a host-clock-based
-approach cannot survive. The session raises `HM_WARN_TICK_PREDICTION_MARGIN` if
+approach cannot survive. The session raises `WR_WARN_TICK_PREDICTION_MARGIN` if
 the margin ever falls below a fifth of budget.
 
 **Skew.** ⚠ The two counters are independent free-running MCU timers. §10.3
@@ -897,22 +897,22 @@ Three guards:
 
 - The rate is fitted jointly, so this cannot arise from the library's own
   arithmetic.
-- If the fitted rate falls outside 795–803 Hz, `HM_CLOCK_RATE_IMPLAUSIBLE` is
+- If the fitted rate falls outside 795–803 Hz, `WR_CLOCK_RATE_IMPLAUSIBLE` is
   raised and the seeded rate is used — an implausible rate is a symptom, not a
   value to publish.
 - If the optimal support edge spans under 2% of the baseline, or if a *pinned*
   rate disagrees with the empirical slope by more than 200 ppm,
-  `HM_CLOCK_DEGENERATE` is raised and the reported uncertainty is inflated.
-  `hm_fit_force_slope()` is a test-only hook that pins the rate; the test pins
+  `WR_CLOCK_DEGENERATE` is raised and the reported uncertainty is inflated.
+  `wr_fit_force_slope()` is a test-only hook that pins the rate; the test pins
   800 Hz and asserts the flag fires, then releases it and asserts the joint fit
   over the same data does not.
 
 **Rate pooled, offset per stream.** §10: the counter resets at every stream start
-but the crystal does not, so `hm_fit_begin_stream()` folds the finished stream's
+but the crystal does not, so `wr_fit_begin_stream()` folds the finished stream's
 slope into a span-weighted pooled estimate and seeds the next stream with it.
 Only a fit with a real baseline and no degeneracy earns a vote. A stream too
 short to separate rate from offset (< 2 s) uses the seed and raises
-`HM_CLOCK_SHORT_BASELINE` rather than publishing a wild slope derived from a few
+`WR_CLOCK_SHORT_BASELINE` rather than publishing a wild slope derived from a few
 milliseconds of jitter.
 
 ⚠ **Read "per stream" as "per stretch", because §6.1.1 reuses the same
@@ -920,7 +920,7 @@ operation at every history pull.** So the pooled rate is a span-weighted average
 over the stretches *between* pulls as well as over streams, and a connection that
 never restarts its stream still accumulates one. That is defensible — the crystal
 is the same throughout — but it is not what "carried over from earlier streams"
-says, and `HM_CLOCK_RATE_POOLED` is now raised only where the published slope
+says, and `WR_CLOCK_RATE_POOLED` is now raised only where the published slope
 really *is* the seed rather than wherever a pooled value merely exists.
 
 ### 6.4 ⚠ Precision and accuracy are different numbers — and different fields
@@ -943,7 +943,7 @@ for the whole session:
 | 600 s | **1,323,000 µs** | no |
 
 At ten minutes it reported 1.32 seconds of uncertainty — larger than the 4.5 s
-window it was describing — so `alignment_budget_us` and `HM_HIST_REFUSED_ALIGNMENT`
+window it was describing — so `alignment_budget_us` and `WR_HIST_REFUSED_ALIGNMENT`
 were permanently on and a consumer gating on one camera frame got zero swings.
 
 **And it is the wrong statistical treatment.** R² = 1.000 against session time
@@ -955,13 +955,13 @@ it is, up to a slope somebody measured once and nobody has applied".
 **So the two are split at the API, not only in the comment:**
 
 ```c
-typedef struct hm_clock_error {
+typedef struct wr_clock_error {
     uint32_t precision_us;   /* link jitter + extrapolation — GATE ON THIS */
     uint32_t systematic_us;  /* §10's measured, uncorrected drift          */
     uint32_t total_us;       /* the honest total, for provenance           */
-} hm_clock_error;
+} wr_clock_error;
 
-hm_clock_error hm_clock_error_at(const hm_clock_snapshot *fit, uint32_t index);
+wr_clock_error wr_clock_error_at(const wr_clock_snapshot *fit, uint32_t index);
 ```
 
 ```
@@ -981,7 +981,7 @@ total      = precision + systematic
 floor exists for**. A fit whose evidence rests on
 a single instant has no residuals — one point cannot disagree with a line drawn
 through it — so all of them evaluate to zero and the function reported *perfect
-accuracy from one observation*. `hm_clock_meets_budget()` then returned true for
+accuracy from one observation*. `wr_clock_meets_budget()` then returned true for
 any budget whatever, which is B2's whole feature switched off without a trace.
 
 ⚠ **And §6.1.1 made that state recur once per PULL rather than once per stream.**
@@ -990,7 +990,7 @@ it, and neither invents a number:
 
 - **The residual figures carry across a re-anchor**, for the same reason the rate
   is pooled: jitter is a property of the *link*, and the link did not change while
-  the device replayed 400 samples. `hm_fit.carry_p90_us` holds the connection's
+  the device replayed 400 samples. `wr_fit.carry_p90_us` holds the connection's
   last real measurement and stands in while `span_us` is 0.
 - **One sample period floors the first fit of a connection**, where there is
   nothing to carry. ≈1251 µs at 799.2 Hz — with one jittered arrival and a
@@ -999,12 +999,12 @@ it, and neither invents a number:
   the alignment a consumer actually asks for is still servable from frame one;
   a sub-millisecond budget is refused until the fit has earned it.
 
-`HM_EV_CLOCK_DEGRADED` is deliberately **not** raised for this state. The flag
+`WR_EV_CLOCK_DEGRADED` is deliberately **not** raised for this state. The flag
 is set at every stream start and every pull and the event is edge-triggered, so
 it would alarm on the ordinary shape of the data — the mistake §8.7 already
 records about holing. An honest `precision_us` is the mechanism; an event is not.
 
-`hm_clock_meets_budget()` compares against **precision**. Both numbers are on
+`wr_clock_meets_budget()` compares against **precision**. Both numbers are on
 every sample (`precision_us`, `uncertainty_us`) and both go into the capture's
 provenance, so nothing is hidden — a consumer records that its alignment was
 good to 3 ms of jitter *and* that an uncorrected systematic of 1.3 s was in
@@ -1029,12 +1029,12 @@ reported uncertainty unchanged, and reasonably conclude the call did nothing.
 They come out of one measurement, so they are set from one struct:
 
 ```c
-hm_clock_correction c = {0};
-c.fields                  = HM_CORRECTION_RATE | HM_CORRECTION_DRIFT;
+wr_clock_correction c = {0};
+c.fields                  = WR_CORRECTION_RATE | WR_CORRECTION_DRIFT;
 c.rate_ppm                = -350.0;
 c.residual_drift_us_per_s =  400.0;
 snprintf(c.provenance, sizeof c.provenance, "bay 3 camera+mic 2026-08-20");
-hm_session_set_clock_correction(session, &c);
+wr_session_set_clock_correction(session, &c);
 ```
 
 ⚠ **`fields` is required and an empty one is an error.** A value sentinel —
@@ -1049,7 +1049,7 @@ The bitmask makes all three failures unreachable: `{0}` is rejected rather than
 obeyed or ignored; setting only the rate leaves the systematic exactly where it
 was; and "I measured it and it is zero" is expressible by flagging the field.
 
-⚠ Note the deliberate asymmetry with `hm_session_policy`, where 0 means *use the
+⚠ Note the deliberate asymmetry with `wr_session_policy`, where 0 means *use the
 default*. Here a flagged 0 is a **measured** zero. The two reach the same
 underlying value by different routes — one is a starting assumption, the other a
 measurement — and they are named differently (`accuracy_drift_us_per_s` vs
@@ -1060,33 +1060,33 @@ every history block.
 
 **Residual spread is a link-health signal** (§10). BLE at range delays
 notifications and nothing in the protocol reports it — the fit degrades quietly
-while every frame still parses. `HM_EV_CLOCK_DEGRADED` fires when p90 crosses
+while every frame still parses. `WR_EV_CLOCK_DEGRADED` fires when p90 crosses
 `policy.residual_alarm_us` (20 ms by default). A library reporting only a point
 estimate of its clock offset has thrown away its only warning that the data is
 drifting out of alignment.
 
 ### 6.5 Host time in, indices out — one conversion, written once
 
-⚠ `hm_time_range` is **half-open** `[start, end)`; `hm_index_range` is
+⚠ `wr_time_range` is **half-open** `[start, end)`; `wr_index_range` is
 **inclusive** `[first, last]`. Both are documented, and that is exactly the
 moment an off-by-one is born, so the conversion exists once:
 
 ```c
-hm_status hm_clock_index_range_for_time(const hm_clock_snapshot *fit,
-                                        hm_time_range window, hm_index_range *out);
+wr_status wr_clock_index_range_for_time(const wr_clock_snapshot *fit,
+                                        wr_time_range window, wr_index_range *out);
 ```
 
 `first` is the smallest index whose mapped host time is `>= start`; `last` is the
 largest whose mapped time is `< end`. A window falling entirely between two
-samples returns `HM_ERR_INVALID_ARG` rather than an inverted range. Nothing else
+samples returns `WR_ERR_INVALID_ARG` rather than an inverted range. Nothing else
 in the library derives one range type from the other.
 
 ### 6.6 The snapshot is a value
 
-`hm_clock_snapshot` is POD, self-contained, and carries `anchor_index`,
+`wr_clock_snapshot` is POD, self-contained, and carries `anchor_index`,
 `anchor_host_us`, `slope_us_per_index`, both rates, the external ppm and its
 provenance, the observation count, span, index range, the residual distribution
-and the drift constant. `hm_clock_to_host_us()` and friends are pure functions
+and the drift constant. `wr_clock_to_host_us()` and friends are pure functions
 on it.
 
 That gives re-analysis determinism: a fit living on a live device object
@@ -1114,16 +1114,16 @@ validation".
 
 ⚠ **The stream must already be running.** §8.2: calibration is not a standalone
 transaction — the device observes a *continuous raise* between the two markers,
-which cannot be done from two static samples. `hm_calibration_begin()` returns
-`HM_ERR_NO_STREAM` rather than trying — and there is deliberately **no**
+which cannot be done from two static samples. `wr_calibration_begin()` returns
+`WR_ERR_NO_STREAM` rather than trying — and there is deliberately **no**
 `AWAIT_STREAM` phase to wait in. Under the one-stream cycle the stream is open
-from just after `HM_EV_READY` and stays open, so a wait would never be
+from just after `WR_EV_READY` and stays open, so a wait would never be
 entered, and an unreachable state is worse than no state. `confirm_horizontal()`
 re-checks, because the stream could stop in between.
 
 | Phase | Meaning | Exits |
 |---|---|---|
-| `IDLE` | | `begin()` → `AWAIT_HORIZONTAL`, or `HM_ERR_NO_STREAM` if not streaming |
+| `IDLE` | | `begin()` → `AWAIT_HORIZONTAL`, or `WR_ERR_NO_STREAM` if not streaming |
 | `AWAIT_HORIZONTAL` | UI asks for pose 0: forearm horizontal, wrist straight | `confirm_horizontal()` → `MARKING_POSE0` |
 | `MARKING_POSE0` | `a2 00` written | `a2 01` reply → `OBSERVING_RAISE`; device bound → `ABORTED` |
 | `OBSERVING_RAISE` | The device is watching a continuous raise | `confirm_raise()` → `MARKING_POSE1`; raise limit → `ABORTED` |
@@ -1133,15 +1133,15 @@ re-checks, because the stream could stop in between.
 | `COMPLETE` | | |
 | `ABORTED` | A real state carrying a reason, not an error string | |
 
-Every transition emits `HM_EV_CALIBRATION_PHASE`, so a UI renders progress from
+Every transition emits `WR_EV_CALIBRATION_PHASE`, so a UI renders progress from
 events rather than polling.
 
 ⚠ **`abort()` at `VERIFYING` reaches `COMPLETE`, not `ABORTED`.** The
 transform is *already applied* by then and no command reverses it (§8.2's device
 re-references its own stream the instant it emits the result), so an abort there
 is a decision to skip the presence check rather than to cancel a calibration.
-The phase carries `HM_CAL_ABORT_CALLER` so the event says who ended it, the angle
-stays NaN and the flag stays `HM_CAL_UNKNOWN`. Reporting `ABORTED` would tell a
+The phase carries `WR_CAL_ABORT_CALLER` so the event says who ended it, the angle
+stays NaN and the flag stays `WR_CAL_UNKNOWN`. Reporting `ABORTED` would tell a
 consumer nothing happened to a stream whose frame had just changed underneath it.
 
 ⚠ **Both marker acknowledgements are bounded too**, by the same
@@ -1167,10 +1167,10 @@ its arrival as success has no failure detection at all.
 device splits the two on the notification's total length, and a status byte
 exists only on the short one. The decoder therefore length-discriminates rather
 than treating 0x94 as fixed-length, because reporting a short form as
-`HM_ERR_TRUNCATED` would drop the device's answer and leave the routine to starve
+`WR_ERR_TRUNCATED` would drop the device's answer and leave the routine to starve
 on its own result timeout. What the status byte *means* is unknown and the form
 has never been captured, so the session reports the byte
-(`HM_WARN_CALIBRATION_STATUS_FORM`) and acts on it exactly as it acts on the long
+(`WR_WARN_CALIBRATION_STATUS_FORM`) and acts on it exactly as it acts on the long
 form: the presence measurement decides, because it tests what the device is
 emitting rather than what a byte claims about it.
 
@@ -1181,7 +1181,7 @@ consumer with a good UI can do something sensible immediately.
 
 ### 7.3 The per-sample flag
 
-`hm_sample.calibration` is one of `UNKNOWN / UNCALIBRATED / CALIBRATED / LOST`
+`wr_sample.calibration` is one of `UNKNOWN / UNCALIBRATED / CALIBRATED / LOST`
 and travels with the data. Pre-calibration quaternions are perfectly
 valid geometry and completely meaningless anatomically, and the transform is
 applied on-device and is not recoverable later — so if the recording does not
@@ -1193,7 +1193,7 @@ carry this flag, the mistake is permanent and invisible.
 |---|---|
 | `UNCALIBRATED` | At create and at every link-up: no routine has been run, and we have looked |
 | `UNKNOWN` | ⚠ From the arrival of `0x94` until a presence check passes — **and on a stream restart from `CALIBRATED`** |
-| `CALIBRATED` | Only by a presence measurement below `HM_PRESENCE_CALIBRATED_MAX_DEG` |
+| `CALIBRATED` | Only by a presence measurement below `WR_PRESENCE_CALIBRATED_MAX_DEG` |
 | `LOST` | ⚠ **Never on a sample.** See below |
 
 ⚠ **`0x94` moves the flag whatever the state machine thinks.** The device
@@ -1201,8 +1201,8 @@ applies the transform for every `a2 01` and re-references its own stream at the
 instant it emits the result (§8.1), so from there the streamed orientations are
 in the anatomical frame — including for a result later than
 `policy.calibration_result_timeout_us`, after the library has already given the
-attempt up. The flag therefore follows the *device*: `HM_CAL_UNKNOWN`, with
-`HM_WARN_CALIBRATION_UNSOLICITED` reporting the arrival. Continuing to label
+attempt up. The flag therefore follows the *device*: `WR_CAL_UNKNOWN`, with
+`WR_WARN_CALIBRATION_UNSOLICITED` reporting the arrival. Continuing to label
 those samples `UNCALIBRATED` would be a confident claim about a frame that had
 just changed.
 
@@ -1215,11 +1215,11 @@ longer know; the second is recoverable by re-running the routine and the first i
 permanent and invisible. It moves **only** from `CALIBRATED` — `UNCALIBRATED` is
 a thing we know, and a restart is no reason to stop knowing it.
 
-⚠ **`HM_CAL_LOST` never appears on a sample**, and phase 3 settled that rather
+⚠ **`WR_CAL_LOST` never appears on a sample**, and phase 3 settled that rather
 than inheriting it. §8.3 measures calibration being destroyed by a plain
 disconnect, but **no sample can be captured between the loss and the notice of
 one**, so a per-sample `LOST` would label nothing; §5.1's link-down goes straight
-to `UNCALIBRATED`. The value's work is on `hm_calibration_span` (§8), where
+to `UNCALIBRATED`. The value's work is on `wr_calibration_span` (§8), where
 `state_at_start = CALIBRATED` with `state_at_end = LOST` distinguishes "never
 calibrated" from "calibrated, and then it went away inside this block" — which is
 what `spans_transition` is for, and is phase 4's to write.
@@ -1230,12 +1230,12 @@ reconnecting, strap untouched and never removed. A reconnect that silently kept
 the flag at `CALIBRATED` would be the single worst bug this API could ship.
 There is no code path that can do it.
 
-`hm_history_block.calibration` carries the same for the block's whole span,
+`wr_history_block.calibration` carries the same for the block's whole span,
 including `spans_transition` when a calibration or a reconnect happened inside.
 
 ### 7.4 No persistence
 
-There is no `hm_calibration_save()`, no `_load()` and no "reuse last session".
+There is no `wr_calibration_save()`, no `_load()` and no "reuse last session".
 §8.3 settles it three ways: lost by remounting (by construction — it maps sensor
 frame to arm frame), by power cycling (3.75° → 15.01° with the strap untouched)
 and by a plain disconnect. Such a convenience would produce confidently wrong
@@ -1296,28 +1296,28 @@ anyone doing anything wrong. The gap is an order of magnitude:
 
 **The modification.** The angle means nothing at an *unknown* pose, and only the
 application knows when the user is at a known one. So the measurement is a
-separate call, `hm_calibration_confirm_reference_pose()`, made when the UI has
+separate call, `wr_calibration_confirm_reference_pose()`, made when the UI has
 returned the user to the neutral pose. The library then takes a short run of live
-samples, reports the **medoid** as `HM_EV_CALIBRATION_PRESENCE` — not a median of
+samples, reports the **medoid** as `WR_EV_CALIBRATION_PRESENCE` — not a median of
 per-sample angles, for the reason two subsections below — and classifies:
 
 | Angle | Result | |
 |---|---|---|
-| < 6° | `HM_CAL_CALIBRATED` | |
-| 6–10° | Indeterminate: **state unchanged** | `HM_WARN_CALIBRATION_INDETERMINATE` |
-| > 10° | `HM_CAL_UNCALIBRATED` | `HM_WARN_CALIBRATION_ABSENT` |
+| < 6° | `WR_CAL_CALIBRATED` | |
+| 6–10° | Indeterminate: **state unchanged** | `WR_WARN_CALIBRATION_INDETERMINATE` |
+| > 10° | `WR_CAL_UNCALIBRATED` | `WR_WARN_CALIBRATION_ABSENT` |
 
 **The call returns before the measurement exists**, and it has to: measuring
 synchronously would mean either blocking, which a sans-I/O core cannot do, or
 reading a single sample, whose angle is worthless at the calibrated end (±4.45°
-on a true 0.36° — see below). `HM_OK` means the run has *started*.
+on a true 0.36° — see below). `WR_OK` means the run has *started*.
 
 ⚠ **The run is bounded twice, and the two bounds answer different failures**
 (phase 3):
 
 | Bound | Value | Why |
 |---|---|---|
-| Count | `HM_PRESENCE_MAX_SAMPLES`, 64 | What the estimator averages over. A burst fills it in 80 ms at the ≈799.2 Hz internal rate |
+| Count | `WR_PRESENCE_MAX_SAMPLES`, 64 | What the estimator averages over. A burst fills it in 80 ms at the ≈799.2 Hz internal rate |
 | Window | 2 s | A held pose is a *resting* wrist, and §6.6 puts the live rate there near 25 Hz — 64 records would take 2.6 s, so the count alone would make a UI wait on the slowest case. Two seconds yields ~50 records there |
 | Floor | 8 records | Below it the run is reported as **not measured** rather than averaged |
 
@@ -1327,12 +1327,12 @@ worst-case quantisation noise at 3.80° is ±0.42°. It is about `pose_spread_de
 A run of one reports a spread of exactly 0.0 — the strongest possible claim from
 the weakest possible evidence, and precisely the "no evidence read as agreement"
 failure §10.2's tests exist to prevent. A run that falls short emits
-`HM_WARN_PRESENCE_NOT_MEASURED` carrying how many arrived, leaves the flag at
-`HM_CAL_UNKNOWN` and the angle NaN, and still reaches `COMPLETE`: the transform
+`WR_WARN_PRESENCE_NOT_MEASURED` carrying how many arrived, leaves the flag at
+`WR_CAL_UNKNOWN` and the angle NaN, and still reaches `COMPLETE`: the transform
 *was* applied; what did not happen is the check.
 
-⚠ **Skipping the call leaves the flag at `HM_CAL_UNKNOWN`, never
-`HM_CAL_CALIBRATED`.** The device applies the transform for every `a2 01`
+⚠ **Skipping the call leaves the flag at `WR_CAL_UNKNOWN`, never
+`WR_CAL_CALIBRATED`.** The device applies the transform for every `a2 01`
 including attempts an application would reject, so "we issued the markers" is not
 evidence that calibration took, and the recording must say we did not check
 rather than imply we did.
@@ -1342,7 +1342,7 @@ rather than imply we did.
 They meet in a normal lesson — a coach re-checking calibration shortly after a
 shot, while the pull for that shot is still in flight:
 
-- **Every `hm_calibration_*` call returns `HM_ERR_BUSY` while a bracket is
+- **Every `wr_calibration_*` call returns `WR_ERR_BUSY` while a bracket is
   open.** A retrieval suspends live delivery (§10.1) and the presence check is
   measured *from* live samples, so it would have nothing to measure; the pose
   markers are host→device writes, which the quiet period holds anyway. Refusing
@@ -1368,9 +1368,9 @@ solve for one.
 
 The presence check already collects a run of samples at a pose the *application*
 declared known, computes an angle, and keeps the quaternions rather than
-throwing them away: `hm_calibration_presence_event` carries
+throwing them away: `wr_calibration_presence_event` carries
 `q_lower_arm[4]`, `q_palm[4]`, the record's `sample_index` and its `skew_us`,
-and `hm_calibration_reference_anchor()` makes them queryable because the event
+and `wr_calibration_reference_anchor()` makes them queryable because the event
 ring is drop-oldest and this is data that cannot be re-derived.
 
 That is not a decomposition and not a frame choice. It is the raw measurement
@@ -1382,7 +1382,7 @@ and "nearly" becomes a fixed rotation error in every subsequent reading.
 
 | | What it is | What it is for |
 |---|---|---|
-| `q_lower_arm` / `q_palm` | The **medoid record** — one real measured pair, with its `sample_index` and a real `skew_us` | The angle and its provenance. `hm_relative_angle_deg()` of this pair reproduces `relative_angle_deg` exactly. |
+| `q_lower_arm` / `q_palm` | The **medoid record** — one real measured pair, with its `sample_index` and a real `skew_us` | The angle and its provenance. `wr_relative_angle_deg()` of this pair reproduces `relative_angle_deg` exactly. |
 | `q_lower_arm_mean` / `q_palm_mean` | The **averaged absolute pose** over the run | ⚠ A frame-reconciliation solve. |
 | `pose_spread_deg[2]` | The largest angular deviation from that mean, per unit | Whether the pose was actually held. |
 
@@ -1447,7 +1447,7 @@ divisor of 16384 means decoded quaternions are unit only to ~4e-5, and at 15° a
 magnitudes wander by. My first implementation compared them un-normalised and
 therefore ranked by rounding error, picking an extreme of the run instead of its
 centre. `test_presence.c` pins the corrected behaviour.
-⚠ A skipped measurement leaves the flag at `HM_CAL_UNKNOWN`, never
+⚠ A skipped measurement leaves the flag at `WR_CAL_UNKNOWN`, never
 optimistically `CALIBRATED`.
 
 ---
@@ -1480,36 +1480,36 @@ does not reset, the clock fit does not restart, and the calibration is
 untouched. The fourth cost survives and has to be designed around:
 
 - The block reports it, because nothing on the wire does — `self_recording_gap`
-  in `hm_history_block`.
+  in `wr_history_block`.
 - The fit re-anchors on the far side of it, and two pulls never share one
   live-frame gap — §6.1.1, from §10.2's wrap budget.
-- `hm_history_request_around()`'s window is sized for time and eviction margin,
+- `wr_history_request_around()`'s window is sized for time and eviction margin,
   never for detail: density is set by the motion in the window (§8.7).
 
 ### 8.2 The two-phase API
 
 ```c
-hm_history_request  r = hm_history_request_around(&policy, impact_us);  /* 3 s / 1.5 s */
+wr_history_request  r = wr_history_request_around(&policy, impact_us);  /* 3 s / 1.5 s */
 uint64_t id;
-hm_history_reserve(s, &r, &id);          /* at detection */
+wr_history_reserve(s, &r, &id);          /* at detection */
 ...
-hm_history_block *b;
-if (hm_history_collect(s, id, &b) == HM_OK) { use(b); hm_history_block_release(b); }
+wr_history_block *b;
+if (wr_history_collect(s, id, &b) == WR_OK) { use(b); wr_history_block_release(b); }
 ```
 
-`hm_history_request_around()` takes the **policy**, not the session. Taking the
+`wr_history_request_around()` takes the **policy**, not the session. Taking the
 policy rather than the session keeps the function pure, needs no live
 device, and is testable without one. `NULL` yields §7.6's 3 s / 1.5 s.
 
 **`reserve()` validates at reserve time**. An empty or inverted window,
-or a `deadline_us` at or before `window.end_us`, is `HM_ERR_INVALID_ARG` — the
+or a `deadline_us` at or before `window.end_us`, is `WR_ERR_INVALID_ARG` — the
 window's last sample does not exist until `end_us`, so such a request is
 unsatisfiable the moment it is made. Two comparisons, and they turn a silent
 four-second timeout into a programming error at the call site.
 
 `reserve` at detection lets retrieval start as soon as the window's last sample
 can exist, so the ~4.5 s cost hides inside the post-impact wait a consumer was
-taking anyway. `collect` never blocks and returns `HM_PENDING` until a
+taking anyway. `collect` never blocks and returns `WR_PENDING` until a
 block exists. A block is produced for *every* terminal outcome — complete,
 holed, short, timed out, cancelled — and always carries its coverage, because a
 capture must record what it got even when what it got is nothing.
@@ -1519,8 +1519,8 @@ capture must record what it got even when what it got is nothing.
 The index range is derived from the fit:
 
 ```
-first = hm_clock_index_for_host_us(fit, window.start_us)
-last  = hm_clock_index_for_host_us(fit, window.end_us)
+first = wr_clock_index_for_host_us(fit, window.start_us)
+last  = wr_clock_index_for_host_us(fit, window.end_us)
 ```
 
 ⚠ Those are *unwrapped*; the wire takes `u16be` and §7.1 requires `first < last`.
@@ -1548,7 +1548,7 @@ any other pair. Three details that are easy to get wrong:
 - ⚠ **A refill gap can itself straddle the wrap**, and is clamped to the near
   turn for the same reason.
 
-A window spanning the wrap **twice** is still refused with `HM_HIST_ERROR`:
+A window spanning the wrap **twice** is still refused with `WR_HIST_ERROR`:
 131,072 indices is 164 s against a buffer measured in seconds, so it cannot be
 served whatever we do, and returning a third of it as though it were all of it
 is the failure this whole section is about.
@@ -1557,11 +1557,11 @@ Refusals that happen before any radio traffic:
 
 | Condition | Result |
 |---|---|
-| No fit, or fit worse than `request.alignment_budget_us` | `HM_HIST_REFUSED_ALIGNMENT` |
-| ⚠ Window on the far side of a pull — see below | `HM_HIST_REFUSED_ALIGNMENT` |
-| Window predates the current stream's start | `HM_HIST_NO_STREAM` |
-| Window outside the resident-range estimate | `HM_HIST_EVICTED` |
-| Legacy `0x7f` stream | `HM_HIST_NOT_ALIGNABLE` — `a1` addresses a header that does not exist (§6.3.1) |
+| No fit, or fit worse than `request.alignment_budget_us` | `WR_HIST_REFUSED_ALIGNMENT` |
+| ⚠ Window on the far side of a pull — see below | `WR_HIST_REFUSED_ALIGNMENT` |
+| Window predates the current stream's start | `WR_HIST_NO_STREAM` |
+| Window outside the resident-range estimate | `WR_HIST_EVICTED` |
+| Legacy `0x7f` stream | `WR_HIST_NOT_ALIGNABLE` — `a1` addresses a header that does not exist (§6.3.1) |
 
 ⚠ **The second row is §6.1.1 reaching the addressing, and it was not in the
 reviewed design.** The fit re-anchors at every pull, so a window older than the
@@ -1576,10 +1576,10 @@ this. It is unreachable under the intended cycle, where reserving at detection
 
 ⚠ **The ask is also CLAMPED to what the device can have counted** —
 `[first_index, head_index]` — and the remainder is reported as an
-`HM_GAP_NOT_RECORDED` on the block rather than requested. A window mapped
+`WR_GAP_NOT_RECORDED` on the block rather than requested. A window mapped
 through a fit can end a few samples past the head, and §7.2 measured "no data
 yet" as one of seven distinct causes that all return the same `d0 03`, which
-costs the whole reply rather than its tail. `swings.hmwire` contains exactly
+costs the whole reply rather than its tail. `swings.wrwire` contains exactly
 that request: one pull asked for 200 indices that did not exist yet.
 
 Refusing and recording the refusal is the point: a consumer must be able
@@ -1594,7 +1594,7 @@ video.
 | `IDLE` | |
 | `QUEUED` | Reserved; waiting for the window's last sample, or for an earlier request |
 | `REQUESTED` | `a1` written; ⚠ waiting for `a1 02`, which is **the acceptance test** — not the absence of an error |
-| `BRACKET_OPEN` | Records arriving; clock marked `HM_CLOCK_BLIND` |
+| `BRACKET_OPEN` | Records arriving; clock marked `WR_CLOCK_BLIND` |
 | `MERGING` | `a1 01` seen; coverage evaluated |
 | `REFILL` | Gaps found and budget remains: re-request the largest gaps |
 | `DONE` | Block materialised |
@@ -1607,7 +1607,7 @@ the requested range — §10.1 measured that over 4,182 mid-stream records, ever
 one did — and warns rather than silently mixing if one does not.
 
 An invalid range yields the leading `a1 01` and then `d0 03`, with **no start
-marker**. `HM_MSG_ID_HISTORY_MARK` with any payload other than `01`/`02` is
+marker**. `WR_MSG_ID_HISTORY_MARK` with any payload other than `01`/`02` is
 rejected ("unknown magic cookie").
 
 **Refill.** A holed result is exactly the thing worth asking for again,
@@ -1624,14 +1624,14 @@ ceiling on the step across 25 retrievals and 17,739 steps. Those indices were
 never *stored*, so re-requesting them returns nothing while costing another
 ~290 ms stall and another hole in the recording (§7.5). Without the qualifier
 every ordinary pull burns all three attempts for no new data — replaying
-`swings.hmwire` through the implemented gather, **all six pulls would have**,
+`swings.wrwire` through the implemented gather, **all six pulls would have**,
 and with it none does.
 
 **Blind span.** From the `a1` write to the closing marker, live delivery
 is suspended, so the fit gets no new observations for roughly the width of the
 window — 4.5 s of blind extrapolation for a 4.5 s pull. The session marks the
-fit `HM_CLOCK_BLIND`, emits `HM_EV_HISTORY_BLIND_SPAN` with the interval, and
-records an `HM_GAP_FIT_BLIND` gap on the block.
+fit `WR_CLOCK_BLIND`, emits `WR_EV_HISTORY_BLIND_SPAN` with the interval, and
+records an `WR_GAP_FIT_BLIND` gap on the block.
 
 ⚠ **The uncertainty penalty is transient, by design.** Uncertainty grows across
 the blind span only while the pull is the most recent thing that happened. The
@@ -1644,7 +1644,7 @@ nothing.
 That is the correct behaviour, not a gap in it: a line supported by observations
 on *both* sides interpolates across an interior gap perfectly well, and the
 device clock has no discontinuity there — penalising it would be pessimism
-without a cause. What durably records the blind span is `HM_GAP_FIT_BLIND` on the
+without a cause. What durably records the blind span is `WR_GAP_FIT_BLIND` on the
 block, which is the right mechanism and needs nothing from the clock.
 `clock_penalises_a_blind_span_while_it_is_the_edge_and_not_once_it_is_interior`
 now tests both halves, so the claim and the code cannot drift apart again.
@@ -1654,15 +1654,15 @@ now tests both halves, so the claim and the code cannot drift apart again.
 Four cases, all reachable in a normal lesson, and one rule
 covering them:
 
-**Anything the consumer initiates yields `HM_HIST_CANCELLED`. Anything that
-happens to us yields `HM_HIST_LINK_LOST`. Both materialise immediately.**
+**Anything the consumer initiates yields `WR_HIST_CANCELLED`. Anything that
+happens to us yields `WR_HIST_LINK_LOST`. Both materialise immediately.**
 
 | Event with a reservation outstanding | Result |
 |---|---|
-| **Link drops.** The stream stops and the index space goes with it | `HM_HIST_LINK_LOST` with whatever arrived. **Immediately**, not at the deadline — a consumer's gather has a bounded wait, and a request that goes quiet after the link has visibly died costs a pipeline stall for no information. |
-| **`hm_session_stop_stream()`** | `HM_HIST_CANCELLED`. §7.4: a restart clears the buffer and resets the index space, so the reservation is unfulfillable from that moment. |
-| **`hm_session_power_off()`** | `HM_HIST_CANCELLED`. |
-| **`hm_session_close()`** | `HM_HIST_CANCELLED`, consistent with `hm_history_cancel()`. |
+| **Link drops.** The stream stops and the index space goes with it | `WR_HIST_LINK_LOST` with whatever arrived. **Immediately**, not at the deadline — a consumer's gather has a bounded wait, and a request that goes quiet after the link has visibly died costs a pipeline stall for no information. |
+| **`wr_session_stop_stream()`** | `WR_HIST_CANCELLED`. §7.4: a restart clears the buffer and resets the index space, so the reservation is unfulfillable from that moment. |
+| **`wr_session_power_off()`** | `WR_HIST_CANCELLED`. |
+| **`wr_session_close()`** | `WR_HIST_CANCELLED`, consistent with `wr_history_cancel()`. |
 
 ⚠ All three consumer-initiated paths **cancel the gather first and queue their
 own command second.** Without that ordering the write quiet period (§5.4) would
@@ -1670,31 +1670,31 @@ hold the consumer's own `83` behind a pull it no longer wants — a stop that ta
 four seconds to leave the queue is a bug, and the middle case is the one a
 consumer causes deliberately and will therefore hit first.
 
-Blocks stay collectable after `close()`; `hm_session_destroy()` releases any the
+Blocks stay collectable after `close()`; `wr_session_destroy()` releases any the
 caller never took.
 
-`HM_HIST_LINK_LOST` is its own status rather than being folded into
-`HM_HIST_NO_STREAM`. The whole design complains that `d0 03` means seven
+`WR_HIST_LINK_LOST` is its own status rather than being folded into
+`WR_HIST_NO_STREAM`. The whole design complains that `d0 03` means seven
 different things (§4.5); reproducing that in our own status enum would be a poor
 joke.
 
 ### 8.4.2 ⚠ Releasing a block is the one call that leaves the session thread
 
-`hm_history_block_release()` runs the allocator, and a realistic integration
+`wr_history_block_release()` runs the allocator, and a realistic integration
 makes the consequence concrete: collect on the I/O thread, hand the block to
 worker threads, and release it on a pool thread, possibly after the session is
 gone. So the contract is stated in `history.h`:
 
 1. It may be called from **any** thread, at any time, including after
-   `hm_session_destroy()`.
-2. It calls the `hm_allocator` supplied at session creation, so **that allocator
+   `wr_session_destroy()`.
+2. It calls the `wr_allocator` supplied at session creation, so **that allocator
    must tolerate being called from a thread other than the session thread.**
    That is a real constraint on anyone routing it to a pool; the default
    malloc/free path already satisfies it.
 3. The block owns a **copy** of the allocator, which is what lets it outlive its
    session.
 
-Implementation note: the public `hm_history_block` is the first member of a
+Implementation note: the public `wr_history_block` is the first member of a
 private allocation record that also holds the allocator copy and the arrays the
 block points at, so `release()` recovers everything from the one pointer and the
 public struct exposes no internals.
@@ -1719,15 +1719,15 @@ So the library does not ship it as a constant. It maintains a bracket:
 and that is what makes the feature work at all.** A rule phrased as "the widest
 span that came back COMPLETE" cannot work, because §7.3 makes
 *every* reply holed — the buffer is motion-adaptive, so a still wrist returns an
-even one-in-eight. Replaying `swings.hmwire` through the implemented gather
-produced **six blocks and zero `HM_HIST_COMPLETE`**. A rule keyed on the status
+even one-in-eight. Replaying `swings.wrwire` through the implemented gather
+produced **six blocks and zero `WR_HIST_COMPLETE`**. A rule keyed on the status
 would therefore never fire on a real device, and both queries would report
-`HM_HISTORY_DEPTH_SEED_US` for ever — the seed figure, measured once, on somebody
+`WR_HISTORY_DEPTH_SEED_US` for ever — the seed figure, measured once, on somebody
 else's session, dressed as a measurement of this connection. That is precisely
 the failure the two queries were left refusing in order to avoid.
 
 The discriminator is §7.3's own step-8 floor, the same one that decides what a
-refill chases and when `HM_WARN_HISTORY_HOLED` fires:
+refill chases and when `WR_WARN_HISTORY_HOLED` fires:
 
 | Observation | What it bounds |
 |---|---|
@@ -1743,7 +1743,7 @@ abandoned at its deadline is missing its old end because we stopped listening,
 and reading that as eviction would shrink the bracket every time a consumer
 cancelled.
 
-`hm_history_resident_range()` reports `[head − depth_lo, head]`, clamped to the
+`wr_history_resident_range()` reports `[head − depth_lo, head]`, clamped to the
 stream start so a stream that began 1.2 s before impact cannot claim to reach
 back further (a different failure from eviction, needing its own
 signal, or it reads as a device fault). The bracket is reset with the stream,
@@ -1752,21 +1752,21 @@ measured a restart clearing it outright.
 
 ⚠ **The status is what separates a measurement from the seed**, and shipping
 that distinction *in the return value* is what let the query be implemented at
-all. `HM_OK` means the width is what this connection's device actually served;
-`HM_PENDING` means nothing has been *served* yet, so no residency has been
+all. `WR_OK` means the width is what this connection's device actually served;
+`WR_PENDING` means nothing has been *served* yet, so no residency has been
 verified, and the range carries the best estimate available — the seed, narrowed
 by any span the device has already **refused**. ⚠ So the width can move while
 the status does not: a `d0 03` lowers the ceiling without anything being
 delivered, and the range is then an upper bound rather than a claim.
-`hm_history_coverage_available()` — a bool, with nowhere to put a caveat —
-answers only from the `HM_OK` case, so before the first pull that delivers it is
+`wr_history_coverage_available()` — a bool, with nowhere to put a caveat —
+answers only from the `WR_OK` case, so before the first pull that delivers it is
 false, which is "we cannot say".
 
 ⚠ **And `depth_lo` is bounded by the widest window anyone has asked for.** A
 consumer that only ever pulls 0.5 s windows can only ever verify 0.5 s, whatever
 the buffer holds. That under-claim is deliberate and asymmetric: a consumer that
 skips a pull because the library said the span was resident has lost the swing,
-where one that pulls a span already gone gets an `HM_HIST_EVICTED` block and
+where one that pulls a span already gone gets an `WR_HIST_EVICTED` block and
 knows. The eviction *warning* below runs on a different, more generous estimate
 for the mirror-image reason.
 
@@ -1774,13 +1774,13 @@ for the mirror-image reason.
 fixed-*duration* buffer could not serve 2.2 s and then refuse 1.4 s; a
 fixed-sample-*count* one can, because the depth in time shrinks by up to 8×
 while the wrist is moving. When it happens the narrower claim wins and
-`HM_WARN_HISTORY_DEPTH_CONFLICT` fires with the crossing. Whether the buffer
+`WR_WARN_HISTORY_DEPTH_CONFLICT` fires with the crossing. Whether the buffer
 holds a fixed duration or a fixed sample count has been open since the first
 capture; this is the channel it answers through.
 
 The query is synchronous, performs no pull and does not block on the radio, so a
 consumer can resolve a whole job — what window, what deadline, what to do if it
-is short — on one thread. ⚠ It does return `HM_ERR_NO_FIT` for the few
+is short — on one thread. ⚠ It does return `WR_ERR_NO_FIT` for the few
 tens of milliseconds after every pull, and that is §6.1.1 reaching this query
 too: the fit re-anchors at each bracket close and cannot date the buffer's head
 until the next live frame lands. Extrapolating through a stall of unknown width
@@ -1801,7 +1801,7 @@ session estimates when its earliest sample will be evicted:
 estimated_eviction_in_us = (window.start_us + depth_us) − now_us
 ```
 
-If that is less than the estimated wait, `HM_EV_HISTORY_EVICTION_RISK` fires with
+If that is less than the estimated wait, `WR_EV_HISTORY_EVICTION_RISK` fires with
 both figures. Silently returning a holed set for the second shot is the failure
 mode this avoids designing around after the fact.
 
@@ -1849,7 +1849,7 @@ and two consequences follow that a "detect the failure" framing gets backwards:
 Intervals-plus-density is the only way a consumer can tell "the swing is here at full rate and the pre-roll is at 100 Hz" — which is
 the *correct* result — from a genuine delivery failure.
 
-`hm_history_block` reports:
+`wr_history_block` reports:
 
 | Field | Question it answers |
 |---|---|
@@ -1876,17 +1876,17 @@ delivered step does answer it: §7.5's 58% reply is two dense runs with a
 the second statement says whether a metric computed inside one of those runs
 exists. The hole is `largest_gap_us`, which is where a hole belongs.
 
-`hm_coverage` uses caller-provided storage. On overflow it coalesces the two
+`wr_coverage` uses caller-provided storage. On overflow it coalesces the two
 nearest intervals: the set stays a valid superset and the index total stays
 exact, but the gap list becomes optimistic — so `overflowed` is surfaced rather
 than swallowed.
 
 ⚠ **Which is why density is measured over the DELIVERED SAMPLES and not over
-`hm_coverage`.** A reply at §7.3's floor is one interval per delivered index —
+`wr_coverage`.** A reply at §7.3's floor is one interval per delivered index —
 precisely the shape that exhausts the storage above — and the coalescing merges
 two intervals *across their gap*, erasing the step being measured. The at-rest
 regime is both the one that overflows and the one density matters most in.
-`hm_sample_step_density()` (history.h) is public for a related reason: a consumer
+`wr_sample_step_density()` (history.h) is public for a related reason: a consumer
 gates on the effective rate in *its* window, typically ±125 ms around impact, and
 the block's own figure is measured over the whole block, pre-roll included.
 
@@ -1930,7 +1930,7 @@ nobody here has seen. Ever non-zero, and everyone finds out at once instead of
 chasing a phantom movement at a seam.
 
 ⚠ **The first evidence is in: 234 indices checked across six real pulls, 0
-mismatched.** `swings.hmwire` replayed through the implemented gather —
+mismatched.** `swings.wrwire` replayed through the implemented gather —
 History *is* a strict superset of live over the same
 span, so the stitch has no seam. The specification never asserts this, so it is
 an assumption — but now one with samples behind it. One capture, one unit, which
@@ -1957,11 +1957,11 @@ sufficient on its own*.
 - **There is no `sendRaw()` and no `sendCommand(uint8_t, …)`.** The library uses
   an allowlist rather than a denylist, so the destructive command is refused by
   construction rather than by documentation.
-- Every write in the library goes through **one gate**, `hm_command_emit()`,
-  which refuses anything not on the list in `src/hm_command.c`.
+- Every write in the library goes through **one gate**, `wr_command_emit()`,
+  which refuses anything not on the list in `src/wr_command.c`.
 - The list is eleven bytes: `80 81 82 83 84 85 86 a0 a1 a2 fa`. Every other
   value the device may accept — ⛔ `f0` above all — is deliberately absent.
-- `hm_command_is_allowed()` and `hm_command_allowlist()` are public so a consumer
+- `wr_command_is_allowed()` and `wr_command_allowlist()` are public so a consumer
   or a test can check the claim. `tests/test_command.c` sweeps all 256 byte
   values and asserts the allowed set is exactly that list.
 
@@ -1984,22 +1984,22 @@ The MAC (`0x85`) and serial (`0x86`) identify a specific unit and a specific
 owner. Three mechanisms, so a consumer that turns on verbose logging
 does not have to think about it:
 
-- `hm_event_is_sensitive()` is true for exactly the events carrying them.
-- `hm_event_format(..., include_identifiers=false)` redacts. A test formats
+- `wr_event_is_sensitive()` is true for exactly the events carrying them.
+- `wr_event_format(..., include_identifiers=false)` redacts. A test formats
   *every* event type with identifiers populated and asserts none leaks — a
   logging path that only works for the events a developer happened to hit is one
   that fails during an incident.
 - The wire log redacts `0x85`/`0x86` payloads unless
-  `policy.record_identifiers` is set, and marks the chunk `HM_WIRE_REDACTED` so
+  `policy.record_identifiers` is set, and marks the chunk `WR_WIRE_REDACTED` so
   a reader knows something was removed rather than absent.
 
 ### 9.3 Unknown messages
 
 §5.1: anything the device sends that is not in the table is **logged and
-ignored**, not treated as an error. `hm_codec_decode()` returns
-`HM_ERR_UNKNOWN_MESSAGE` with `consumed` set to the whole buffer — an unknown id
+ignored**, not treated as an error. `wr_codec_decode()` returns
+`WR_ERR_UNKNOWN_MESSAGE` with `consumed` set to the whole buffer — an unknown id
 has no implied length, so nothing after it can be located — and the session
-emits `HM_EV_UNKNOWN_MESSAGE` with the id and the first few bytes.
+emits `WR_EV_UNKNOWN_MESSAGE` with the id and the first few bytes.
 
 ---
 
@@ -2013,8 +2013,8 @@ emits `HM_EV_UNKNOWN_MESSAGE` with the id and the first few bytes.
 | Build | CMake ≥ 3.16; presets `dev`, `san`, `cov`, `rel` |
 | Dependencies | **None.** The core links `libm`. The test harness is vendored. |
 | Warnings | `-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wcast-qual -Wstrict-prototypes -Wswitch-enum -Wdouble-promotion -Wvla`, `-Werror` by default |
-| Sanitizers | `HM_ENABLE_ASAN`, `HM_ENABLE_UBSAN` |
-| Coverage | `HM_ENABLE_COVERAGE` (gcov), CI gate 85% over `src/` |
+| Sanitizers | `WR_ENABLE_ASAN`, `WR_ENABLE_UBSAN` |
+| Coverage | `WR_ENABLE_COVERAGE` (gcov), CI gate 85% over `src/` |
 | Install | Headers, static/shared lib, pkg-config, CMake package |
 | CI | Linux gcc + clang, Linux ASan/UBSan, macOS, Windows MSVC, coverage |
 
@@ -2029,12 +2029,12 @@ need none of them and CI covers the rest.
 
 The suite is not coverage theatre. Each test traces to a numbered claim, and its
 name says which. 239 cases, ~51,000 assertions — the bulk of them from the
-wrap-resolution test, which replays a full 238 s session, and from the `.hmwire`
+wrap-resolution test, which replays a full 238 s session, and from the `.wrwire`
 round trip — all run under ASan+UBSan in CI as well as unsanitised.
 
 ⚠ **A test that agrees with the code is worse than no test**, and phase 5 found
 three. So a new test that pins a *choice* is confirmed by disabling the fix and
-watching it fail; eight of that phase's were. `tests/hm_test.h` aborts rather
+watching it fail; eight of that phase's were. `tests/wr_test.h` aborts rather
 than silently dropping a case past its cap, for the same reason.
 
 | File | What it pins |
@@ -2049,12 +2049,12 @@ than silently dropping a case past its cap, for the same reason.
 | `test_presence.c` | Classification across §8.2's three populations; the reference-pose anchor is a real record; the sub-degree quantisation floor |
 | `test_overlap.c` | The digest covers raw counts and nothing derived; agreement and disagreement both detected; no storage reads as no evidence |
 | `test_device.c` | UUIDs, discovery matching, MTU floor, policy defaults, identifier redaction, ABI self-description |
-| `test_record.c` | The `.hmwire` round trip byte-exact including a preserved sequence gap; a refused over-long chunk; a truncated file; and the reconciliation recovering a rate, a tick ratio and a skew it was not given — plus the empty capture reporting **no evidence** on all nine claims |
-| `test_capture_format.py` | ⚠ The Python writer against the C reader. Two implementations of one format, and ⛔ that the script's command set is exactly `hmwire allowlist` |
+| `test_record.c` | The `.wrwire` round trip byte-exact including a preserved sequence gap; a refused over-long chunk; a truncated file; and the reconciliation recovering a rate, a tick ratio and a skew it was not given — plus the empty capture reporting **no evidence** on all nine claims |
+| `test_capture_format.py` | ⚠ The Python writer against the C reader. Two implementations of one format, and ⛔ that the script's command set is exactly `wrwire allowlist` |
 | `test_python_abi.py` | ⚠ The binding's ctypes declarations against the compiler's, both directions: every struct size, every field offset, every mirrored enumerator. §4.6.1 says what it cannot see |
 | `test_python_replay.py` | ⚠ The same gather over the same real bytes, C against Python, block tables **equal** — and the density signature asserted by value, because equality alone is satisfied by two runs that reached nothing |
 | `test_python_lifetime.py` | The released-block guard. ⚠ The one hazard ctypes adds, and the one no sanitizer sees |
-| `purity.cmake` | The core still references no clock, thread, socket or file API. ⚠ Runs on `hackmotion`, never on `hackmotion_ffi` |
+| `purity.cmake` | The core still references no clock, thread, socket or file API. ⚠ Runs on `wrist`, never on `wrist_ffi` |
 
 Four deserve singling out:
 
@@ -2086,24 +2086,24 @@ Four deserve singling out:
 - **`reconcile_reports_no_evidence_rather_than_agreement_on_an_empty_capture`.**
   A capture with nothing in it must not report zero mismatches, zero suspect
   norms and zero disagreements as though the specification had been confirmed.
-  All nine verdicts must come back `HM_CHECK_NO_EVIDENCE`. It is the shortest
+  All nine verdicts must come back `WR_CHECK_NO_EVIDENCE`. It is the shortest
   test in the suite and it is the one that decides whether a reconciliation
   report means anything.
 - **`reconcile_keeps_bracketed_history_records_out_of_the_clock_fit`.** Live and
   history `0x90` frames are byte-identical and the `a1 02` … `a1 01` bracket is
   the only discriminator (§10.1). 500 bulk arrivals inside a bracket must reach
-  the record census and **not** `hm_fit_observe` — exercised early against
+  the record census and **not** `wr_fit_observe` — exercised early against
   a real file rather than late against a state machine.
 
 ### 10.3 Golden vectors are hand-computed
 
-`tests/fixtures/hm_fixtures.h` holds byte arrays written by hand with every
+`tests/fixtures/wr_fixtures.h` holds byte arrays written by hand with every
 expected value computed by hand from the section named beside it. A fixture
 generated by the code it tests proves only self-consistency; these catch byte
 order, field offsets and scale selectors, which §1's table exists because of —
 byte order is **not** uniform across this protocol.
 
-`tests/hm_wire.h` is a builder for everything above that, at scale.
+`tests/wr_wire.h` is a builder for everything above that, at scale.
 
 ### 10.4 Testing without a radio
 
@@ -2139,21 +2139,21 @@ become code, and where a bug is a silently wrong swing rather than a crash:
 
 | Module | Exec. lines | Line coverage |
 |---|---|---|
-| `hm_clock.c` — the fit, snapshot, error split, index ranges | 349 | 94.3% |
-| `hm_overlap.c` — live-vs-history digest and ring | 67 | **100%** |
-| `hm_presence.c` — presence classification, the medoid anchor and the averaged pose | 95 | 85.3% |
-| `hm_codec.c` — framing, decode, scaling, pinned detection | 212 | 93.9% |
-| `hm_coverage.c` — interval algebra (reach) | 170 | 88.2% |
-| `hm_density.c` — the median delivered step (completeness) | 25 | — |
-| `hm_unwrap.c` — index, ticks, skew | 78 | 98.7% |
-| `hm_quat.c` — convention, presence angle, pinned counts | 84 | 92.9% |
-| `hm_command.c` — encoders + allowlist gate | 55 | **100%** |
-| `hm_config.c`, `hm_device.c`, `hm_defaults.c`, `hm_version.c` | 170 | 93.5% |
-| `hm_session.c` — the link, stream, calibration and history machines, deadlines, live path, wire log | 1736 | 91.5% |
-| `hm_status.c` — enum names and event formatting | 229 | 70.7% |
+| `wr_clock.c` — the fit, snapshot, error split, index ranges | 349 | 94.3% |
+| `wr_overlap.c` — live-vs-history digest and ring | 67 | **100%** |
+| `wr_presence.c` — presence classification, the medoid anchor and the averaged pose | 95 | 85.3% |
+| `wr_codec.c` — framing, decode, scaling, pinned detection | 212 | 93.9% |
+| `wr_coverage.c` — interval algebra (reach) | 170 | 88.2% |
+| `wr_density.c` — the median delivered step (completeness) | 25 | — |
+| `wr_unwrap.c` — index, ticks, skew | 78 | 98.7% |
+| `wr_quat.c` — convention, presence angle, pinned counts | 84 | 92.9% |
+| `wr_command.c` — encoders + allowlist gate | 55 | **100%** |
+| `wr_config.c`, `wr_device.c`, `wr_defaults.c`, `wr_version.c` | 170 | 93.5% |
+| `wr_session.c` — the link, stream, calibration and history machines, deadlines, live path, wire log | 1736 | 91.5% |
+| `wr_status.c` — enum names and event formatting | 229 | 70.7% |
 | **Total** | **3249** | **90.8%** |
 
-`hm_status.c` is the outlier and is meant to be: it is almost entirely string
+`wr_status.c` is the outlier and is meant to be: it is almost entirely string
 tables, and the uncovered lines are `default:` arms for enum values that cannot
 exist. The algorithmic modules are held to a higher bar because a gap there is a
 silently wrong swing rather than a crash.
@@ -2162,36 +2162,36 @@ silently wrong swing rather than a crash.
 
 | Module | What it is |
 |---|---|
-| `record/hm_record.c` | The `.hmwire` container: writer, reader, byte-exact round trip (§5.6) |
-| `record/hm_reconcile.c` | A capture replayed against this specification, claim by claim |
-| `record/hm_report.c` | The report — ⚠ never an estimate without the count behind it |
-| `tools/hm_wire_tool.c` | `hmwire info` / `dump` / `verify` / `reconcile` / `allowlist` / `abi` |
-| `tools/hm_capture.py` | The radio front-end. ⛔ Takes its allowlist from `hmwire allowlist`; refuses to run without it |
-| `tools/hm_gather_replay.c` | ⚠ Phase 4. A capture replayed through the *implemented* gather, where `hmwire reconcile` replays it against the *specification*. `--json PATH` writes the per-block table for the binding to be compared against, leaving stdout byte-identical |
+| `record/wr_record.c` | The `.wrwire` container: writer, reader, byte-exact round trip (§5.6) |
+| `record/wr_reconcile.c` | A capture replayed against this specification, claim by claim |
+| `record/wr_report.c` | The report — ⚠ never an estimate without the count behind it |
+| `tools/wr_wire_tool.c` | `wrwire info` / `dump` / `verify` / `reconcile` / `allowlist` / `abi` |
+| `tools/wr_capture.py` | The radio front-end. ⛔ Takes its allowlist from `wrwire allowlist`; refuses to run without it |
+| `tools/wr_gather_replay.c` | ⚠ Phase 4. A capture replayed through the *implemented* gather, where `wrwire reconcile` replays it against the *specification*. `--json PATH` writes the per-block table for the binding to be compared against, leaving stdout byte-identical |
 | `tests/test_record.c` | 28 cases, 15,351 assertions |
 | `tests/test_capture_format.py` | ⚠ The Python writer against the C reader — two implementations of one format, pinned |
 
-`hackmotion_record` is a separate target and is deliberately **outside the
+`wrist_record` is a separate target and is deliberately **outside the
 purity gate**: it opens files, which is exactly what the core must never do.
 
 **The session core:**
 
 | Module | What it is |
 |---|---|
-| `src/hm_session.c` | The link machine (§5.1-5.4), the stream machine (§5.5), the deadline table (§5.7), the live path and the clock fit (§6), the wire log (§5.6) |
+| `src/wr_session.c` | The link machine (§5.1-5.4), the stream machine (§5.5), the deadline table (§5.7), the live path and the clock fit (§6), the wire log (§5.6) |
 
 **Calibration:**
 
 | | What it is |
 |---|---|
 | The phase machine of §7.2 | Both markers, the shared `a2 01` acknowledgement, `0x94`, the raise limit and the device bound, every transition evented |
-| The presence run of §7.5 | A bounded run of live samples → `hm_presence_select_reference()` → `HM_EV_CALIBRATION_PRESENCE`, the three bands, the kept anchor |
-| The interlocks | `HM_ERR_BUSY` on every call while a bracket is open, with `abort()` exempt |
+| The presence run of §7.5 | A bounded run of live samples → `wr_presence_select_reference()` → `WR_EV_CALIBRATION_PRESENCE`, the three bands, the kept anchor |
+| The interlocks | `WR_ERR_BUSY` on every call while a bracket is open, with `abort()` exempt |
 | `tests/test_session.c` | 89 cases, 26,203 assertions, driven entirely through a fake transport on a synthetic clock |
 
 ⚠ **Reaching `COMPLETE` is not being calibrated.** The library will say
-`HM_CAL_CALIBRATED` only where a presence measurement passed; a skipped check, a
-declined one and a starved one all leave `HM_CAL_UNKNOWN`, because `0x94` is not
+`WR_CAL_CALIBRATED` only where a presence measurement passed; a skipped check, a
+declined one and a starved one all leave `WR_CAL_UNKNOWN`, because `0x94` is not
 a verdict and §7.3 records that a sample wrongly labelled `CALIBRATED` is
 permanent and invisible.
 
@@ -2202,16 +2202,16 @@ permanent and invisible.
 | The gather of §8.4 | `reserve` / `collect` / `cancel`, the queued table, the `a1` and its `u16be` re-wrap, the bracket, the stateless history unwrap, the coverage accounting, the refill, the merge, the block |
 | Every failure shape of §8.4.1 | holed, short, the leading `a1 01` + `d0 03`, timeout, cancel, link-lost, `REFUSED_ALIGNMENT`, `NOT_ALIGNABLE`, `EVICTED` — a block for every terminal outcome, always carrying its coverage |
 | ⚠ §6.1.1, discharged | The fit re-anchors at every bracket close; a request is dated by the snapshot taken when its **window** closed; no second `a1` goes out before a live frame; a window on the far side of a pull is refused rather than addressed wrong |
-| ⚠ §7.3, discharged | A refill chases only gaps wider than the measured step-8 floor, and `HM_WARN_HISTORY_HOLED` only fires above it — otherwise every ordinary pull burns its whole attempt budget re-requesting samples that were never stored |
-| §8.5's depth bracket | Learned from the **old end of the delivered set**, never from the block's status — which on real hardware is `HOLED` every time. `hm_history_resident_range()` says `HM_OK` once something has been served and `HM_PENDING` while the width is still only an estimate; `hm_history_coverage_available()` answers only from the served case |
+| ⚠ §7.3, discharged | A refill chases only gaps wider than the measured step-8 floor, and `WR_WARN_HISTORY_HOLED` only fires above it — otherwise every ordinary pull burns its whole attempt budget re-requesting samples that were never stored |
+| §8.5's depth bracket | Learned from the **old end of the delivered set**, never from the block's status — which on real hardware is `HOLED` every time. `wr_history_resident_range()` says `WR_OK` once something has been served and `WR_PENDING` while the width is still only an estimate; `wr_history_coverage_available()` answers only from the served case |
 | §8.6's eviction estimate | §5.7's third history row. The serial schedule is **solved**, so the warning is one deadline rather than a poll, and it fires once per request, cancels nothing, and runs on a deliberately more generous depth than the query reports |
 | §8.3's wrap split | A window across the 82.0 s counter wrap goes out as two `a1`s and comes back as one block, ascending across the seam. The far half is **not** charged to `max_attempts`, and it waits for a live frame like every other second pull |
-| The R8 interlock, both halves | A gather will not open a bracket while a calibration routine is running, and every `hm_calibration_*` call refuses inside one |
-| `tools/hm_gather_replay.c` | ⚠ The gather driven by a real device's own bytes — the only validation retrieval gets |
+| The R8 interlock, both halves | A gather will not open a bracket while a calibration routine is running, and every `wr_calibration_*` call refuses inside one |
+| `tools/wr_gather_replay.c` | ⚠ The gather driven by a real device's own bytes — the only validation retrieval gets |
 
 ⚠ **Validated against hardware, because it cannot be validated at a desk.**
 §7.3's buffer is motion-adaptive, so a synthetic full-rate reply proves only
-that the gather handles one. `swings.hmwire` — five golf swings, six mid-stream
+that the gather handles one. `swings.wrwire` — five golf swings, six mid-stream
 pulls — was replayed through a real session with the gather live: six blocks,
 657–728 Hz over the swings and 99.9 Hz over the still one, **density 1.000 over
 the swings against 0.125 over the still wrist**, no step above the floor in 1,736
@@ -2225,19 +2225,19 @@ ctest --test-dir build/dev -R 'capture|gather_replay'
 `tests/fixtures/` — 672 K of write-once bytes, which is what §10.5 meant by
 replay fixtures — so the one test that exercises retrieval against real
 hardware is no longer something a session has to remember to do by hand.
-`.gitignore` still excludes `*.hmwire` everywhere else, so an ad-hoc recording
+`.gitignore` still excludes `*.wrwire` everywhere else, so an ad-hoc recording
 cannot be committed by accident, and each fixture was checked redacted at the
 byte level before it was added.
 
 ⚠ **The exit codes still separate "passed" from "nothing to pass", and that is
 the load-bearing part.** **0** every check passed, **1** a check failed, **2**
 usage or I/O error, **3** nothing was checked. A capture with no retrieval in it
-— `smoke.hmwire` — reports `NO EVIDENCE` on every line rather than six green
+— `smoke.wrwire` — reports `NO EVIDENCE` on every line rather than six green
 checks over zero samples, and `gather_replay_reports_no_evidence_when_nothing_
 was_pulled` pins that, because it is the half that rots first.
 
-✅ **`session1.hmwire` now replays too, and it is the other regime.**
-`swings.hmwire`'s pulls are over swings and come back at 657–728 Hz; this one is
+✅ **`session1.wrwire` now replays too, and it is the other regime.**
+`swings.wrwire`'s pulls are over swings and come back at 657–728 Hz; this one is
 a calibration choreography, so its single pull is over a wrist held still and
 comes back at §7.3's 100 Hz floor — 495 of its 501 steps are exactly 8. It also
 sits at 173 s, **past two index wraps**, which is the only real-hardware
@@ -2249,7 +2249,7 @@ replay tool relaxes *that one bound* and says so at the call site — the delay 
 a property of the recorder, not of the device, and the bound is tested where it
 belongs, in `tests/test_session.c`.
 
-⚠ `hmwire reconcile` is deliberately **not** wired into `ctest` alongside it:
+⚠ `wrwire reconcile` is deliberately **not** wired into `ctest` alongside it:
 three of its claims legitimately DIFFER on this hardware, and that is the
 finding rather than a regression. A gate over it would either lie or need
 editing every time the device teaches us something.
@@ -2258,37 +2258,37 @@ editing every time the device teaches us something.
 
 | Module | What it is |
 |---|---|
-| `hackmotion_ffi` (CMake) | ⚠ ONE shared object holding the core **and** the record module. `hackmotion_record` reaches internal headers, so a shared core hides what it needs and the ordinary target is disabled for `BUILD_SHARED_LIBS`; compiling both source lists into one object sidesteps that, since hidden visibility only hides symbols from *outside*. ⚠ The purity gate stays on `hackmotion` and must never be pointed here — this object opens files by construction |
-| `tools/hm_abi_table.c` | Every public struct's size and field offsets, and every mirrored enum's values, straight from the compiler. Self-checks that its rows tile each struct. `hmwire abi` |
-| `python/hackmotion/_types.py` | The structs and enums in ctypes, hand-written so the load-bearing warnings travel with them, and pinned field-for-field against the table above |
-| `python/hackmotion/_library.py` | Locating and loading the object, every prototype declared, `hm_abi_check()` at import. ⚠ An undeclared prototype is not callable: ctypes would default it to `int` and truncate a pointer |
-| `python/hackmotion/session.py` | `Session`, `Event`, `Samples`, `HistoryBlock`. ⚠ Capacities only — the library owns every buffer, because a Python object outliving a C session is a use-after-free waiting to be written |
-| `python/hackmotion/record.py` | `Recorder` / `Replay` over `record/hm_record.c` — ⚠ the C implementation, not a second one |
-| `tools/hm_replay_py.py` | `hm_gather_replay.c` through the binding, line for line |
+| `wrist_ffi` (CMake) | ⚠ ONE shared object holding the core **and** the record module. `wrist_record` reaches internal headers, so a shared core hides what it needs and the ordinary target is disabled for `BUILD_SHARED_LIBS`; compiling both source lists into one object sidesteps that, since hidden visibility only hides symbols from *outside*. ⚠ The purity gate stays on `wrist` and must never be pointed here — this object opens files by construction |
+| `tools/wr_abi_table.c` | Every public struct's size and field offsets, and every mirrored enum's values, straight from the compiler. Self-checks that its rows tile each struct. `wrwire abi` |
+| `python/wrist/_types.py` | The structs and enums in ctypes, hand-written so the load-bearing warnings travel with them, and pinned field-for-field against the table above |
+| `python/wrist/_library.py` | Locating and loading the object, every prototype declared, `wr_abi_check()` at import. ⚠ An undeclared prototype is not callable: ctypes would default it to `int` and truncate a pointer |
+| `python/wrist/session.py` | `Session`, `Event`, `Samples`, `HistoryBlock`. ⚠ Capacities only — the library owns every buffer, because a Python object outliving a C session is a use-after-free waiting to be written |
+| `python/wrist/record.py` | `Recorder` / `Replay` over `record/wr_record.c` — ⚠ the C implementation, not a second one |
+| `tools/wr_replay_py.py` | `wr_gather_replay.c` through the binding, line for line |
 | `tests/test_python_abi.py` | 331 checks: every struct size, every field offset, every enumerator, both directions |
 | `tests/test_python_replay.py` | ⚠ The same gather driven twice over the same real bytes, C and Python, block table equal — **plus the density signature by value**, because equality alone would be satisfied by two runs that reached nothing |
 | `tests/test_python_lifetime.py` | The block-release guard, which is the one hazard ctypes adds |
 
 ⚠ **The parity test is the one that matters, and it is not a table of numbers.**
-It asserts that two implementations agree over `swings.hmwire`, `session1.hmwire`
-and `smoke.hmwire` — six blocks, one block and none — including the exit codes,
+It asserts that two implementations agree over `swings.wrwire`, `session1.wrwire`
+and `smoke.wrwire` — six blocks, one block and none — including the exit codes,
 so the empty case still reports NOTHING WAS CHECKED from both sides. The C tool
 does not use the binding, so a disagreement is always the binding's fault and is
 never resolved by editing the test. §4.6.1 has what these checks cannot see.
 
 ⚠ **Two real transcription errors were caught by the enum table on the day it was
-written**: `hm_gap_kind`'s first two members were the wrong way round, and four
+written**: `wr_gap_kind`'s first two members were the wrong way round, and four
 of eleven history statuses were on the wrong numbers. Both read as perfectly
 ordinary Python. That is why the enum dump exists at all — the library's own
-`hm_*_name()` functions could only have pinned about half of them.
+`wr_*_name()` functions could only have pinned about half of them.
 
 **The radio:**
 
 | Module | What it is |
 |---|---|
-| `python/hackmotion/device.py` | What a scanner needs, published as data. ⚠ The four UUIDs are read out of the loaded object with `in_dll` and the name match is `hm_looks_like_hackmotion()` — **so a transport built on this holds no second copy of the device's identity**, and there is nothing here that can drift from `device.h` |
-| `python/hackmotion/bleak_transport.py` | The reference transport. ⚠ OPTIONAL and outside the core: `import hackmotion` does not import it and `bleak` is not a dependency of the binding. Five arrows and nothing else — connect, notify, pump, write, classify |
-| `tools/hm_bench.py` | The exemplar. Connect, bring up, stream, optionally calibrate, retrieve each swing **while it is still in the buffer**, record through `hm_recorder_*`, and report the three coverage numbers each with the raw number behind it |
+| `python/wrist/device.py` | What a scanner needs, published as data. ⚠ The four UUIDs are read out of the loaded object with `in_dll` and the name match is `wr_looks_like_sensor()` — **so a transport built on this holds no second copy of the device's identity**, and there is nothing here that can drift from `device.h` |
+| `python/wrist/bleak_transport.py` | The reference transport. ⚠ OPTIONAL and outside the core: `import wrist` does not import it and `bleak` is not a dependency of the binding. Five arrows and nothing else — connect, notify, pump, write, classify |
+| `tools/wr_bench.py` | The exemplar. Connect, bring up, stream, optionally calibrate, retrieve each swing **while it is still in the buffer**, record through `wr_recorder_*`, and report the three coverage numbers each with the raw number behind it |
 | `tests/test_python_transport.py` | ⚠ The transport with the radio replaced and nothing else, over **both** fixtures. 52 checks. Needs no `bleak` and no adapter |
 
 ⚠ **Four properties the loopback pins, and two were confirmed by breaking them.**
@@ -2328,7 +2328,7 @@ replay**, a new best.
 |---|---|
 | Reference BlueZ transport | ⚠ **Deferred, not cancelled, and its justification has shrunk.** `bleak` covers Linux, macOS and Windows and is already proven against this sensor, so the Python transport proves the sans-I/O shape composes on three platforms where a BlueZ one proves it on one. What remains is "a C consumer wants a copy-paste example", and it can be written when somebody asks. ⚠ It is also the only way to answer "what does an event loop cost the clock fit" — see §6.4 of the findings, where that comparison is recorded as NO EVIDENCE. |
 | Wheels / PyPI | The shared object is found by environment variable or build directory. Bundling one per platform is its own work and belongs *after* the binding has met a sensor. |
-| `hackmotion.hpp` — optional C++ RAII wrapper | Adds no ABI; follows the core. |
+| `wrist.hpp` — optional C++ RAII wrapper | Adds no ABI; follows the core. |
 
 ---
 
@@ -2336,19 +2336,19 @@ replay**, a new best.
 
 | Header | Contents |
 |---|---|
-| `hackmotion/hackmotion.h` | Umbrella |
-| `hackmotion/types.h` | `hm_status`, `hm_time_us`, `hm_uuid`, ranges, `hm_allocator` |
-| `hackmotion/version.h` | Version, `hm_abi_sizes`, `hm_abi_check()` |
-| `hackmotion/device.h` | Advertised name, GATT UUIDs, MTU floor, device limits, `hm_device_info` |
-| `hackmotion/config.h` | `hm_stream_config` and its wire-format consequences |
-| `hackmotion/sample.h` | `hm_sample`, `hm_unit_sample`, scales, flags, pinned counts |
-| `hackmotion/quat.h` | The composition order, relative rotation, presence angle |
-| `hackmotion/clock.h` | `hm_clock_snapshot`, mapping, uncertainty, rate constants |
-| `hackmotion/coverage.h` | Interval algebra |
-| `hackmotion/event.h` | `hm_event` and its payloads |
-| `hackmotion/history.h` | Request, block, statuses, gaps |
-| `hackmotion/session.h` | The session, the threading contract, calibration, the allowlist |
+| `wrist/wrist.h` | Umbrella |
+| `wrist/types.h` | `wr_status`, `wr_time_us`, `wr_uuid`, ranges, `wr_allocator` |
+| `wrist/version.h` | Version, `wr_abi_sizes`, `wr_abi_check()` |
+| `wrist/device.h` | Advertised name, GATT UUIDs, MTU floor, device limits, `wr_device_info` |
+| `wrist/config.h` | `wr_stream_config` and its wire-format consequences |
+| `wrist/sample.h` | `wr_sample`, `wr_unit_sample`, scales, flags, pinned counts |
+| `wrist/quat.h` | The composition order, relative rotation, presence angle |
+| `wrist/clock.h` | `wr_clock_snapshot`, mapping, uncertainty, rate constants |
+| `wrist/coverage.h` | Interval algebra |
+| `wrist/event.h` | `wr_event` and its payloads |
+| `wrist/history.h` | Request, block, statuses, gaps |
+| `wrist/session.h` | The session, the threading contract, calibration, the allowlist |
 
-Internal, reachable from tests: `src/hm_codec.h`, `src/hm_command.h`,
-`src/hm_unwrap.h`, `src/hm_fit.h`.
+Internal, reachable from tests: `src/wr_codec.h`, `src/wr_command.h`,
+`src/wr_unwrap.h`, `src/wr_fit.h`.
 

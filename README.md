@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (C) 2026 Mark Liversedge -->
-# libhackmotion
+# libwrist
 
 A **C11 library for integrating with HackMotion wrist sensors** over
 Bluetooth Low Energy, with **Python bindings** for driving one from Python.
@@ -36,21 +36,21 @@ about your project** — not its build type, not its test registry, not its inst
 manifest. Drop it in and link:
 
 ```cmake
-add_subdirectory(libhackmotion)        # or FetchContent_MakeAvailable(hackmotion)
-target_link_libraries(your_app PRIVATE hackmotion)
+add_subdirectory(libwrist)        # or FetchContent_MakeAvailable(wrist)
+target_link_libraries(your_app PRIVATE wrist)
 ```
 
-`#include <hackmotion/hackmotion.h>` then resolves through the link — the include
+`#include <wrist/wrist.h>` then resolves through the link — the include
 directory is `PUBLIC` on the target.
 
 You get the library and nothing else. The tests, the command line tools, the FFI
 shared object, `-Werror` and the install rules all default to ON when this is the
 top-level project and OFF when it is not, so there is no list of options to switch
-off first. Each is still an ordinary option if you want it: `HM_BUILD_TESTS`,
-`HM_BUILD_TOOLS`, `HM_BUILD_FFI`, `HM_WERROR`, `HM_INSTALL`.
+off first. Each is still an ordinary option if you want it: `WR_BUILD_TESTS`,
+`WR_BUILD_TOOLS`, `WR_BUILD_FFI`, `WR_WERROR`, `WR_INSTALL`.
 
-`HM_BUILD_RECORD` is the exception and defaults ON either way — `hackmotion_record`
-is a library target rather than developer tooling, and linking the `.hmwire`
+`WR_BUILD_RECORD` is the exception and defaults ON either way — `wrist_record`
+is a library target rather than developer tooling, and linking the `.wrwire`
 container is an ordinary thing for a consumer to want. It needs the core's internal
 symbols, so it is available in a static build only.
 
@@ -58,24 +58,24 @@ Static or shared is `BUILD_SHARED_LIBS` as usual.
 
 ## Python
 
-The build also produces `libhackmotion_ffi`, which the binding loads. There is
+The build also produces `libwrist_ffi`, which the binding loads. There is
 nothing further to install:
 
 ```sh
-PYTHONPATH=python python3 -c "import hackmotion; print(hackmotion.VERSION)"
+PYTHONPATH=python python3 -c "import wrist; print(wrist.VERSION)"
 ```
 
 An optional [`bleak`](https://github.com/hbldh/bleak) transport drives a real
-sensor on Linux, macOS and Windows. `tools/hm_bench.py` is a complete session
+sensor on Linux, macOS and Windows. `tools/wr_bench.py` is a complete session
 written against it — connect, stream, retrieve, record — and is meant to be
 copied:
 
 ```sh
 pip install bleak
-./tools/hm_bench.py --out bench.hmwire --duration 90
+./tools/wr_bench.py --out bench.wrwire --duration 90
 ```
 
-`bleak` is required only for that transport; `import hackmotion` neither imports
+`bleak` is required only for that transport; `import wrist` neither imports
 nor needs it. See [`python/README.md`](python/README.md).
 
 ## Safety
@@ -84,7 +84,7 @@ nor needs it. See [`python/README.md`](python/README.md).
 sensor into firmware-update mode, and it reaches that mode through the *ordinary
 data characteristic* — avoiding the OTA service is not sufficient on its own.
 
-The bytes this library can emit are a short allowlist in `src/hm_command.c`,
+The bytes this library can emit are a short allowlist in `src/wr_command.c`,
 enforced by a single gate. There is no `sendRaw()` and there will not be one.
 
 Fuzzing the **decoder** is a different activity and is encouraged.

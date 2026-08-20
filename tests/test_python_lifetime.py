@@ -16,7 +16,7 @@ exists rather than a comment telling people to be careful.
 So this file pins the guard.  Without it the failure is a wrong swing rather
 than a crash — the worst shape this library admits.
 
-Usage: test_python_lifetime.py <libhackmotion_ffi.so> [<fixture.hmwire>]
+Usage: test_python_lifetime.py <libwrist_ffi.so> [<fixture.wrwire>]
 """
 
 import os
@@ -53,19 +53,19 @@ def raises(fn, what):
 def first_block(fixture: Path):
     """Drive a real capture far enough to hold one history block.
 
-    A compressed copy of tools/hm_replay_py.py's loop — this test needs a block
+    A compressed copy of tools/wr_replay_py.py's loop — this test needs a block
     that OUTLIVES its collection, which that tool deliberately never produces.
     """
-    import hackmotion as hm
-    from hackmotion import _types as T
+    import wrist as wr
+    from wrist import _types as T
 
-    session = hm.Session(
+    session = wr.Session(
         "lifetime",
-        digest_ring=hm.HM_DIGEST_RING_RECOMMENDED,
+        digest_ring=wr.WR_DIGEST_RING_RECOMMENDED,
         policy={"stream_start_timeout_us": 15_000_000},
     )
     pending = 0
-    with hm.Replay(fixture) as replay:
+    with wr.Replay(fixture) as replay:
         for chunk in replay:
             if chunk.direction == T.WireDirection.META:
                 text = bytes(chunk.data[: chunk.length])
@@ -81,16 +81,16 @@ def first_block(fixture: Path):
                         last = min(
                             (chunk.data[3] << 8) | chunk.data[4], snapshot.last_index
                         )
-                        request = T.hm_history_request()
+                        request = T.wr_history_request()
                         request.window.start_us = (
-                            hm.clock_to_host_us(snapshot, last - 400) - 1
+                            wr.clock_to_host_us(snapshot, last - 400) - 1
                         )
-                        request.window.end_us = hm.clock_to_host_us(snapshot, last) + 1
+                        request.window.end_us = wr.clock_to_host_us(snapshot, last) + 1
                         request.deadline_us = chunk.host_time_us + 60_000_000
                         request.max_attempts = 1
                         try:
                             pending = session.history_reserve(request)
-                        except hm.HackMotionError:
+                        except wr.WristError:
                             pass
             else:
                 session.on_bytes(bytes(chunk.data[: chunk.length]), chunk.host_time_us)
@@ -113,9 +113,9 @@ def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
         return 2
-    os.environ["HACKMOTION_LIBRARY"] = sys.argv[1]
+    os.environ["WRIST_LIBRARY"] = sys.argv[1]
     fixture = Path(sys.argv[2]) if len(sys.argv) > 2 else (
-        Path(__file__).resolve().parent / "fixtures" / "swings.hmwire"
+        Path(__file__).resolve().parent / "fixtures" / "swings.wrwire"
     )
     if not fixture.is_file():
         print(f"⚠ NOTHING WAS CHECKED: {fixture} is missing", file=sys.stderr)
@@ -179,7 +179,7 @@ def main() -> int:
         )
 
     # ⚠ Releasing twice through the wrapper must be harmless.  The C call is not
-    # idempotent — a second hm_history_block_release() on the same pointer is a
+    # idempotent — a second wr_history_block_release() on the same pointer is a
     # use-after-free, which ASan does report — so the wrapper is what makes
     # `with` plus an explicit `.release()` safe to write.
     block.release()

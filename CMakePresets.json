@@ -21,8 +21,8 @@
       "binaryDir": "${sourceDir}/build/san",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "HM_ENABLE_ASAN": "ON",
-        "HM_ENABLE_UBSAN": "ON"
+        "WR_ENABLE_ASAN": "ON",
+        "WR_ENABLE_UBSAN": "ON"
       }
     },
     {
@@ -31,7 +31,7 @@
       "binaryDir": "${sourceDir}/build/cov",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "HM_ENABLE_COVERAGE": "ON"
+        "WR_ENABLE_COVERAGE": "ON"
       }
     },
     {
@@ -44,7 +44,7 @@
     {
       "name": "release",
       "displayName": "Release — optimised, NO debug info",
-      "description": "-O3 -DNDEBUG and no -g: the shipping artefact. Measured against `rel` on the same source, libhackmotion.a is 110 KB rather than 342 KB, and dwarfdump reports zero compile units rather than 15. Distinct from `rel` on purpose — `rel` is for debugging an optimised build, this is for shipping one, and one preset cannot be both.",
+      "description": "-O3 -DNDEBUG and no -g: the shipping artefact. Measured against `rel` on the same source, libwrist.a is 110 KB rather than 342 KB, and dwarfdump reports zero compile units rather than 15. Distinct from `rel` on purpose — `rel` is for debugging an optimised build, this is for shipping one, and one preset cannot be both.",
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     }

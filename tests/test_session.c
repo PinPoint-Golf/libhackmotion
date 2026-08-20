@@ -12,13 +12,13 @@
  * The cases below are the ones docs/implementation-notes.md §2 names for
  * increments 1-3, plus the failure shapes that are silent if nobody looks.
  */
-#include "hm_test.h"
+#include "wr_test.h"
 
-#include "hackmotion/hackmotion.h"
-#include "hackmotion/session.h"
+#include "wrist/wrist.h"
+#include "wrist/session.h"
 
-#include "hm_codec.h"
-#include "hm_command.h"
+#include "wr_codec.h"
+#include "wr_command.h"
 
 /* ------------------------------------------------------------------------ */
 /* A fake transport                                                          */
@@ -29,21 +29,21 @@
 #define FAKE_MAX_WIRE   1024
 
 typedef struct fake {
-    hm_session *s;
-    hm_time_us  now;
+    wr_session *s;
+    wr_time_us  now;
     bool        drain_writes;
 
-    uint8_t written[FAKE_MAX_WRITES][HM_MAX_COMMAND_LEN];
+    uint8_t written[FAKE_MAX_WRITES][WR_MAX_COMMAND_LEN];
     uint8_t written_len[FAKE_MAX_WRITES];
     size_t  nwritten;
 
-    hm_event events[FAKE_MAX_EVENTS];
+    wr_event events[FAKE_MAX_EVENTS];
     size_t   nevents;
 
-    hm_sample live[FAKE_MAX_LIVE];
+    wr_sample live[FAKE_MAX_LIVE];
     size_t    nlive;
 
-    hm_wire_chunk wire[FAKE_MAX_WIRE];
+    wr_wire_chunk wire[FAKE_MAX_WIRE];
     size_t        nwire;
 } fake;
 
@@ -73,12 +73,12 @@ static void counting_free(void *ctx, void *ptr)
 static void drain(fake *f)
 {
     for (;;) {
-        hm_write_request w[8];
+        wr_write_request w[8];
         size_t           n;
         if (!f->drain_writes) {
             break;
         }
-        n = hm_session_poll_writes(f->s, w, 8u);
+        n = wr_session_poll_writes(f->s, w, 8u);
         if (n == 0u) {
             break;
         }
@@ -91,8 +91,8 @@ static void drain(fake *f)
         }
     }
     for (;;) {
-        hm_event ev[8];
-        size_t   n = hm_session_poll_events(f->s, ev, 8u);
+        wr_event ev[8];
+        size_t   n = wr_session_poll_events(f->s, ev, 8u);
         if (n == 0u) {
             break;
         }
@@ -103,8 +103,8 @@ static void drain(fake *f)
         }
     }
     for (;;) {
-        hm_sample sm[16];
-        size_t    n = hm_session_poll_live(f->s, sm, 16u);
+        wr_sample sm[16];
+        size_t    n = wr_session_poll_live(f->s, sm, 16u);
         if (n == 0u) {
             break;
         }
@@ -115,8 +115,8 @@ static void drain(fake *f)
         }
     }
     for (;;) {
-        hm_wire_chunk wc[4];
-        size_t        n = hm_session_poll_wire(f->s, wc, 4u);
+        wr_wire_chunk wc[4];
+        size_t        n = wr_session_poll_wire(f->s, wc, 4u);
         if (n == 0u) {
             break;
         }
@@ -130,46 +130,46 @@ static void drain(fake *f)
 
 /* The accumulators are megabytes, so the fake lives on the heap rather than
  * eating the stack a sanitiser build has less of. */
-static fake *fake_open(const hm_session_config *cfg)
+static fake *fake_open(const wr_session_config *cfg)
 {
-    hm_session_config c = (cfg != NULL) ? *cfg : hm_session_config_default();
+    wr_session_config c = (cfg != NULL) ? *cfg : wr_session_config_default();
     fake             *f = (fake *)calloc(1u, sizeof(fake));
-    HM_ASSERT(f != NULL);
+    WR_ASSERT(f != NULL);
     if (f == NULL) {
         return NULL;
     }
     f->drain_writes = true;
     /* An arbitrary non-zero epoch: the library must never interpret it. */
-    f->now = (hm_time_us)1000 * 1000 * 1000;
-    HM_ASSERT_EQ(hm_session_create(&c, &f->s), HM_OK);
+    f->now = (wr_time_us)1000 * 1000 * 1000;
+    WR_ASSERT_EQ(wr_session_create(&c, &f->s), WR_OK);
     return f;
 }
 
 static void fake_close(fake *f)
 {
-    hm_session_destroy(f->s);
+    wr_session_destroy(f->s);
     free(f);
 }
 
 static void feed(fake *f, const uint8_t *data, size_t n)
 {
-    hm_session_on_bytes(f->s, data, n, f->now);
+    wr_session_on_bytes(f->s, data, n, f->now);
     drain(f);
 }
 
-static void tick_at(fake *f, hm_time_us when)
+static void tick_at(fake *f, wr_time_us when)
 {
     f->now = when;
-    hm_session_tick(f->s, when);
+    wr_session_tick(f->s, when);
     drain(f);
 }
 
 /* Advance to `target`, honouring every deadline on the way. */
-static void run_to(fake *f, hm_time_us target)
+static void run_to(fake *f, wr_time_us target)
 {
     for (;;) {
-        hm_time_us due = hm_session_next_due_us(f->s);
-        if (due == HM_TIME_NEVER || due > target) {
+        wr_time_us due = wr_session_next_due_us(f->s);
+        if (due == WR_TIME_NEVER || due > target) {
             break;
         }
         tick_at(f, (due < f->now) ? f->now : due);
@@ -201,7 +201,7 @@ static void reply_bringup(fake *f)
 
 static void bring_up(fake *f)
 {
-    hm_session_on_link_up(f->s, 247, f->now);
+    wr_session_on_link_up(f->s, 247, f->now);
     drain(f);
     reply_bringup(f);
 }
@@ -271,7 +271,7 @@ static void feed_frame(fake *f, uint16_t index, uint16_t ticks, int16_t accel_x)
 
 static uint16_t ticks_for(uint32_t index)
 {
-    return (uint16_t)((uint32_t)(index * HM_NOMINAL_TICKS_PER_SAMPLE + 0.5) & 0xffffu);
+    return (uint16_t)((uint32_t)(index * WR_NOMINAL_TICKS_PER_SAMPLE + 0.5) & 0xffffu);
 }
 
 /*
@@ -330,20 +330,20 @@ static fake *cal_open_to_verifying(void)
     fake *f = fake_open(NULL);
 
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
 
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
     feed_cal_result(f);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_VERIFYING);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_VERIFYING);
     return f;
 }
 
@@ -357,7 +357,7 @@ static fake *cal_measure_at(double deg, size_t frames)
 {
     fake *f = cal_open_to_verifying();
 
-    HM_ASSERT_EQ(hm_calibration_confirm_reference_pose(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_reference_pose(f->s), WR_OK);
     for (size_t i = 0; i < frames; ++i) {
         uint32_t index = 200u + (uint32_t)i;
         f->now += 4000; /* 250 Hz — well inside the run's own window */
@@ -366,11 +366,11 @@ static fake *cal_measure_at(double deg, size_t frames)
     return f;
 }
 
-static const hm_event *last_phase_event(const fake *f)
+static const wr_event *last_phase_event(const fake *f)
 {
-    const hm_event *found = NULL;
+    const wr_event *found = NULL;
     for (size_t i = 0; i < f->nevents; ++i) {
-        if (f->events[i].type == (uint16_t)HM_EV_CALIBRATION_PHASE) {
+        if (f->events[i].type == (uint16_t)WR_EV_CALIBRATION_PHASE) {
             found = &f->events[i];
         }
     }
@@ -380,7 +380,7 @@ static const hm_event *last_phase_event(const fake *f)
 /* ------------------------------------------------------------------------ */
 /* Small queries over what the fake collected                                */
 /* ------------------------------------------------------------------------ */
-static size_t count_events(const fake *f, hm_event_type type)
+static size_t count_events(const fake *f, wr_event_type type)
 {
     size_t n = 0;
     for (size_t i = 0; i < f->nevents; ++i) {
@@ -391,7 +391,7 @@ static size_t count_events(const fake *f, hm_event_type type)
     return n;
 }
 
-static const hm_event *find_event(const fake *f, hm_event_type type)
+static const wr_event *find_event(const fake *f, wr_event_type type)
 {
     for (size_t i = 0; i < f->nevents; ++i) {
         if (f->events[i].type == (uint16_t)type) {
@@ -401,11 +401,11 @@ static const hm_event *find_event(const fake *f, hm_event_type type)
     return NULL;
 }
 
-static size_t count_warnings(const fake *f, hm_warning_code code)
+static size_t count_warnings(const fake *f, wr_warning_code code)
 {
     size_t n = 0;
     for (size_t i = 0; i < f->nevents; ++i) {
-        if (f->events[i].type == (uint16_t)HM_EV_WARNING &&
+        if (f->events[i].type == (uint16_t)WR_EV_WARNING &&
             f->events[i].u.warning.code == (uint16_t)code) {
             n++;
         }
@@ -427,40 +427,40 @@ static size_t count_writes(const fake *f, uint8_t command, size_t from)
 /* ------------------------------------------------------------------------ */
 /* Increment 1 — lifecycle, memory, rings, link-up, MTU                      */
 /* ------------------------------------------------------------------------ */
-HM_TEST(session_makes_exactly_one_allocation_and_one_free)
+WR_TEST(session_makes_exactly_one_allocation_and_one_free)
 {
-    hm_session_config cfg = hm_session_config_default();
-    hm_session       *s = NULL;
+    wr_session_config cfg = wr_session_config_default();
+    wr_session       *s = NULL;
 
     g_allocs = 0;
     g_frees = 0;
     cfg.allocator.alloc = counting_alloc;
     cfg.allocator.free = counting_free;
 
-    HM_ASSERT_EQ(hm_session_create(&cfg, &s), HM_OK);
-    HM_ASSERT(s != NULL);
-    HM_ASSERT_EQ(g_allocs, 1u);
+    WR_ASSERT_EQ(wr_session_create(&cfg, &s), WR_OK);
+    WR_ASSERT(s != NULL);
+    WR_ASSERT_EQ(g_allocs, 1u);
     /* The session object lives inside that one block, so the footprint is one
      * knowable number rather than a scatter of small allocations. */
-    HM_ASSERT(g_alloc_bytes > sizeof(hm_sample) * HM_LIVE_RING_RECOMMENDED);
+    WR_ASSERT(g_alloc_bytes > sizeof(wr_sample) * WR_LIVE_RING_RECOMMENDED);
 
-    hm_session_destroy(s);
-    HM_ASSERT_EQ(g_frees, 1u);
+    wr_session_destroy(s);
+    WR_ASSERT_EQ(g_frees, 1u);
 
     /* And nothing allocates after create: the library owns no growth path. */
-    HM_ASSERT_EQ(g_allocs, 1u);
+    WR_ASSERT_EQ(g_allocs, 1u);
 }
 
-HM_TEST(supplying_every_ring_still_costs_exactly_one_allocation)
+WR_TEST(supplying_every_ring_still_costs_exactly_one_allocation)
 {
-    static hm_sample      live[64];
-    static hm_event       events[16];
-    static hm_wire_chunk  wire[8];
-    static hm_index_range coverage[8];
-    static hm_live_digest digests[8];
-    static hm_sample      gather[8];
-    hm_session_config     cfg = hm_session_config_default();
-    hm_session           *s = NULL;
+    static wr_sample      live[64];
+    static wr_event       events[16];
+    static wr_wire_chunk  wire[8];
+    static wr_index_range coverage[8];
+    static wr_live_digest digests[8];
+    static wr_sample      gather[8];
+    wr_session_config     cfg = wr_session_config_default();
+    wr_session           *s = NULL;
     size_t                default_bytes;
     size_t                supplied_bytes;
 
@@ -468,9 +468,9 @@ HM_TEST(supplying_every_ring_still_costs_exactly_one_allocation)
     g_frees = 0;
     cfg.allocator.alloc = counting_alloc;
     cfg.allocator.free = counting_free;
-    HM_ASSERT_EQ(hm_session_create(&cfg, &s), HM_OK);
+    WR_ASSERT_EQ(wr_session_create(&cfg, &s), WR_OK);
     default_bytes = g_alloc_bytes;
-    hm_session_destroy(s);
+    wr_session_destroy(s);
     s = NULL;
 
     g_allocs = 0;
@@ -490,11 +490,11 @@ HM_TEST(supplying_every_ring_still_costs_exactly_one_allocation)
     cfg.memory.history_gather = gather;
     cfg.memory.history_gather_capacity = 8u;
 
-    HM_ASSERT_EQ(hm_session_create(&cfg, &s), HM_OK);
-    HM_ASSERT_EQ(g_allocs, 1u);
+    WR_ASSERT_EQ(wr_session_create(&cfg, &s), WR_OK);
+    WR_ASSERT_EQ(g_allocs, 1u);
     supplied_bytes = g_alloc_bytes;
-    hm_session_destroy(s);
-    HM_ASSERT_EQ(g_frees, 1u);
+    wr_session_destroy(s);
+    WR_ASSERT_EQ(g_frees, 1u);
 
     /*
      * ⚠ ONE allocation, not zero — the session object itself, which the caller
@@ -502,13 +502,13 @@ HM_TEST(supplying_every_ring_still_costs_exactly_one_allocation)
      * plan drops out of the allocation, leaving only fixed state (the clock
      * fit's bounded hull and residual window dominate it).
      */
-    HM_ASSERT(supplied_bytes + sizeof(hm_sample) * HM_LIVE_RING_RECOMMENDED < default_bytes);
-    HM_ASSERT(supplied_bytes < 64u * 1024u);
+    WR_ASSERT(supplied_bytes + sizeof(wr_sample) * WR_LIVE_RING_RECOMMENDED < default_bytes);
+    WR_ASSERT(supplied_bytes < 64u * 1024u);
 }
 
-HM_TEST(a_zeroed_config_gets_the_observed_default_not_config_zero)
+WR_TEST(a_zeroed_config_gets_the_observed_default_not_config_zero)
 {
-    hm_session_config cfg;
+    wr_session_config cfg;
 
     memset(&cfg, 0, sizeof(cfg));
     fake *f = fake_open(&cfg);
@@ -517,59 +517,59 @@ HM_TEST(a_zeroed_config_gets_the_observed_default_not_config_zero)
      * ⚠ `= {0}` leaves stream_config.bits at 0x00, which is a REAL and
      * destructive configuration: no tick counters, a different block size and
      * half the gyro scale.  It is not a configuration anyone picks on purpose,
-     * and hm_stream_config_nonstandard() always writes a justification, so an
+     * and wr_stream_config_nonstandard() always writes a justification, so an
      * entirely empty one means "unset".
      */
-    HM_ASSERT_EQ(hm_session_stream_config(f->s).bits, HM_CONFIG_OBSERVED_DEFAULT);
-    HM_ASSERT(hm_stream_config_has_ticks(hm_session_stream_config(f->s)));
+    WR_ASSERT_EQ(wr_session_stream_config(f->s).bits, WR_CONFIG_OBSERVED_DEFAULT);
+    WR_ASSERT(wr_stream_config_has_ticks(wr_session_stream_config(f->s)));
     fake_close(f);
 }
 
-HM_TEST(bringup_runs_the_nine_one_sequence_and_reaches_ready)
+WR_TEST(bringup_runs_the_nine_one_sequence_and_reaches_ready)
 {
     fake *f = fake_open(NULL);
 
-    hm_session_on_link_up(f->s, 247, f->now);
+    wr_session_on_link_up(f->s, 247, f->now);
     drain(f);
 
     /* §9.1: 80, 81, 84, 81, 86, 85.  The vendor app sends `86` three times;
      * that is its behaviour, not a device requirement, so we send it once. */
-    HM_ASSERT_EQ(f->nwritten, 6u);
-    HM_ASSERT_EQ(f->written[0][0], 0x80);
-    HM_ASSERT_EQ(f->written[1][0], 0x81);
-    HM_ASSERT_EQ(f->written[2][0], 0x84);
-    HM_ASSERT_EQ(f->written[3][0], 0x81);
-    HM_ASSERT_EQ(f->written[4][0], 0x86);
-    HM_ASSERT_EQ(f->written[5][0], 0x85);
-    HM_ASSERT_EQ(count_writes(f, 0x86, 0u), 1u);
+    WR_ASSERT_EQ(f->nwritten, 6u);
+    WR_ASSERT_EQ(f->written[0][0], 0x80);
+    WR_ASSERT_EQ(f->written[1][0], 0x81);
+    WR_ASSERT_EQ(f->written[2][0], 0x84);
+    WR_ASSERT_EQ(f->written[3][0], 0x81);
+    WR_ASSERT_EQ(f->written[4][0], 0x86);
+    WR_ASSERT_EQ(f->written[5][0], 0x85);
+    WR_ASSERT_EQ(count_writes(f, 0x86, 0u), 1u);
 
-    HM_ASSERT_EQ(count_events(f, HM_EV_LINK_UP), 1u);
-    HM_ASSERT_EQ(count_events(f, HM_EV_READY), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_LINK_UP), 1u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_READY), 0u);
 
     reply_bringup(f);
-    HM_ASSERT_EQ(count_events(f, HM_EV_READY), 1u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_READY), 1u);
 
     {
-        hm_device_info info;
-        HM_ASSERT_EQ(hm_session_device_info(f->s, &info), HM_OK);
-        HM_ASSERT_EQ(info.protocol_major, 4);
-        HM_ASSERT_EQ(info.firmware_minor, 8);
-        HM_ASSERT_EQ(info.product_id, 0x14);
+        wr_device_info info;
+        WR_ASSERT_EQ(wr_session_device_info(f->s, &info), WR_OK);
+        WR_ASSERT_EQ(info.protocol_major, 4);
+        WR_ASSERT_EQ(info.firmware_minor, 8);
+        WR_ASSERT_EQ(info.product_id, 0x14);
         /* ⚠ Two sensors because the reply carries two BYTES, not because its
          * first byte reads 2 (§5.4).  The bytes are location codes: 0.26 m then
          * 0.10 m, the lower arm first, matching the block order of a record. */
-        HM_ASSERT_EQ(info.sensor_count, 2);
-        HM_ASSERT_EQ(info.sensor_location[0], 0x02);
-        HM_ASSERT_EQ(info.sensor_location[1], 0x01);
-        HM_ASSERT_EQ(info.battery_percent, 100);
-        HM_ASSERT_EQ(info.status_undecoded, 2226); /* ⚠ NOT millivolts */
-        HM_ASSERT_STR(info.mac, "A1:B2:C3:D4:E5:F6");
-        HM_ASSERT_STR(info.serial, "WG3001234");
-        HM_ASSERT_EQ(info.valid, (uint32_t)(HM_INFO_VERSIONS | HM_INFO_SENSOR_MAP |
-                                            HM_INFO_BATTERY | HM_INFO_MAC | HM_INFO_SERIAL));
+        WR_ASSERT_EQ(info.sensor_count, 2);
+        WR_ASSERT_EQ(info.sensor_location[0], 0x02);
+        WR_ASSERT_EQ(info.sensor_location[1], 0x01);
+        WR_ASSERT_EQ(info.battery_percent, 100);
+        WR_ASSERT_EQ(info.status_undecoded, 2226); /* ⚠ NOT millivolts */
+        WR_ASSERT_STR(info.mac, "A1:B2:C3:D4:E5:F6");
+        WR_ASSERT_STR(info.serial, "WG3001234");
+        WR_ASSERT_EQ(info.valid, (uint32_t)(WR_INFO_VERSIONS | WR_INFO_SENSOR_MAP |
+                                            WR_INFO_BATTERY | WR_INFO_MAC | WR_INFO_SERIAL));
     }
     /* Two `81` polls in the sequence produce two battery events. */
-    HM_ASSERT_EQ(count_events(f, HM_EV_BATTERY), 2u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_BATTERY), 2u);
     fake_close(f);
 }
 
@@ -583,25 +583,25 @@ HM_TEST(bringup_runs_the_nine_one_sequence_and_reaches_ready)
  * quaternion norm would catch the misalignment (§6.4), but it would fire once
  * per record and never name the cause, and the cause is knowable here.
  */
-HM_TEST(a_sensor_count_the_record_layout_cannot_carry_is_reported_at_the_map)
+WR_TEST(a_sensor_count_the_record_layout_cannot_carry_is_reported_at_the_map)
 {
     fake         *f = fake_open(NULL);
     /* Three payload bytes: three sensors, whatever the individual codes say. */
     const uint8_t three_sensors[4] = { 0x84, 0x02, 0x01, 0x00 };
 
-    hm_session_on_link_up(f->s, 247, f->now);
+    wr_session_on_link_up(f->s, 247, f->now);
     drain(f);
     feed(f, k_versions, sizeof(k_versions));
     feed(f, k_status, sizeof(k_status));
     feed(f, three_sensors, sizeof(three_sensors));
 
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_SENSOR_COUNT_UNSUPPORTED), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_SENSOR_COUNT_UNSUPPORTED), 1u);
     {
         size_t i;
         for (i = 0; i < f->nevents; ++i) {
-            if (f->events[i].type == (uint16_t)HM_EV_WARNING &&
-                f->events[i].u.warning.code == (uint16_t)HM_WARN_SENSOR_COUNT_UNSUPPORTED) {
-                HM_ASSERT_EQ(f->events[i].u.warning.detail_i32, 3);
+            if (f->events[i].type == (uint16_t)WR_EV_WARNING &&
+                f->events[i].u.warning.code == (uint16_t)WR_WARN_SENSOR_COUNT_UNSUPPORTED) {
+                WR_ASSERT_EQ(f->events[i].u.warning.detail_i32, 3);
             }
         }
     }
@@ -610,11 +610,11 @@ HM_TEST(a_sensor_count_the_record_layout_cannot_carry_is_reported_at_the_map)
      * library cannot decode is exactly the thing a capture should preserve, and
      * the location codes are what would identify the extra unit. */
     {
-        hm_device_info info;
-        HM_ASSERT_EQ(hm_session_device_info(f->s, &info), HM_OK);
-        HM_ASSERT_EQ(info.sensor_count, 3);
-        HM_ASSERT_EQ(info.sensor_location[2], 0x00);
-        HM_ASSERT(info.valid & (uint32_t)HM_INFO_SENSOR_MAP);
+        wr_device_info info;
+        WR_ASSERT_EQ(wr_session_device_info(f->s, &info), WR_OK);
+        WR_ASSERT_EQ(info.sensor_count, 3);
+        WR_ASSERT_EQ(info.sensor_location[2], 0x00);
+        WR_ASSERT(info.valid & (uint32_t)WR_INFO_SENSOR_MAP);
     }
     fake_close(f);
 }
@@ -630,26 +630,26 @@ HM_TEST(a_sensor_count_the_record_layout_cannot_carry_is_reported_at_the_map)
  * Reported once, at the version reply, so a capture says which hardware made
  * it rather than being re-read later under constants that never applied.
  */
-HM_TEST(a_product_the_specification_was_not_measured_on_is_reported_not_refused)
+WR_TEST(a_product_the_specification_was_not_measured_on_is_reported_not_refused)
 {
     fake *f = fake_open(NULL);
     /* Same protocol 4.0, same shape of reply — only the product id differs. */
     uint8_t next_generation[sizeof(k_versions)];
 
     memcpy(next_generation, k_versions, sizeof(next_generation));
-    next_generation[7] = 0x15; /* not HM_PRODUCT_ID_MEASURED */
+    next_generation[7] = 0x15; /* not WR_PRODUCT_ID_MEASURED */
 
-    hm_session_on_link_up(f->s, 247, f->now);
+    wr_session_on_link_up(f->s, 247, f->now);
     drain(f);
     feed(f, next_generation, sizeof(next_generation));
 
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_UNVERIFIED_PRODUCT), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_UNVERIFIED_PRODUCT), 1u);
     {
         size_t i;
         for (i = 0; i < f->nevents; ++i) {
-            if (f->events[i].type == (uint16_t)HM_EV_WARNING &&
-                f->events[i].u.warning.code == (uint16_t)HM_WARN_UNVERIFIED_PRODUCT) {
-                HM_ASSERT_EQ(f->events[i].u.warning.detail_i32, 0x15);
+            if (f->events[i].type == (uint16_t)WR_EV_WARNING &&
+                f->events[i].u.warning.code == (uint16_t)WR_WARN_UNVERIFIED_PRODUCT) {
+                WR_ASSERT_EQ(f->events[i].u.warning.detail_i32, 0x15);
             }
         }
     }
@@ -658,38 +658,38 @@ HM_TEST(a_product_the_specification_was_not_measured_on_is_reported_not_refused)
      * failed: the library has no evidence the protocol differs, and refusing
      * hardware on the strength of a version byte would be a guess in the one
      * direction that cannot be recovered from. */
-    HM_ASSERT_EQ(count_events(f, HM_EV_LINK_DOWN), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_LINK_DOWN), 0u);
     {
-        hm_device_info info;
-        HM_ASSERT_EQ(hm_session_device_info(f->s, &info), HM_OK);
-        HM_ASSERT_EQ(info.product_id, 0x15);
-        HM_ASSERT_EQ(info.protocol_major, 4); /* gating still reads THIS */
+        wr_device_info info;
+        WR_ASSERT_EQ(wr_session_device_info(f->s, &info), WR_OK);
+        WR_ASSERT_EQ(info.product_id, 0x15);
+        WR_ASSERT_EQ(info.protocol_major, 4); /* gating still reads THIS */
     }
     fake_close(f);
 }
 
 /* The measured device says 0x14, and says it without a warning. */
-HM_TEST(the_product_the_specification_was_measured_on_is_not_warned_about)
+WR_TEST(the_product_the_specification_was_measured_on_is_not_warned_about)
 {
     fake *f = fake_open(NULL);
 
     bring_up(f);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_UNVERIFIED_PRODUCT), 0u);
-    HM_ASSERT_EQ(k_versions[7], HM_PRODUCT_ID_MEASURED);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_UNVERIFIED_PRODUCT), 0u);
+    WR_ASSERT_EQ(k_versions[7], WR_PRODUCT_ID_MEASURED);
     fake_close(f);
 }
 
 /* The device under test says two, and says it without a warning. */
-HM_TEST(the_two_sensor_map_this_device_sends_is_not_warned_about)
+WR_TEST(the_two_sensor_map_this_device_sends_is_not_warned_about)
 {
     fake *f = fake_open(NULL);
 
     bring_up(f);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_SENSOR_COUNT_UNSUPPORTED), 0u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_SENSOR_COUNT_UNSUPPORTED), 0u);
     fake_close(f);
 }
 
-HM_TEST(an_mtu_below_the_floor_is_rejected_and_nothing_is_ever_written)
+WR_TEST(an_mtu_below_the_floor_is_rejected_and_nothing_is_ever_written)
 {
     fake *f = fake_open(NULL);
 
@@ -699,80 +699,80 @@ HM_TEST(an_mtu_below_the_floor_is_rejected_and_nothing_is_ever_written)
      * the library can only check — and failing loudly beats truncated frames
      * that parse as garbage on whichever platform eventually gets it wrong.
      */
-    hm_session_on_link_up(f->s, 64, f->now);
+    wr_session_on_link_up(f->s, 64, f->now);
     drain(f);
 
     {
-        const hm_event *ev = find_event(f, HM_EV_MTU_REJECTED);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_MTU_REJECTED);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.mtu, 64);
+            WR_ASSERT_EQ(ev->u.mtu, 64);
         }
     }
-    HM_ASSERT_EQ(count_events(f, HM_EV_LINK_UP), 0u);
-    HM_ASSERT_EQ(f->nwritten, 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_LINK_UP), 0u);
+    WR_ASSERT_EQ(f->nwritten, 0u);
 
     /* And it stays refused: no deadline fires anything into the queue, and the
      * consumer cannot talk it round either. */
-    run_to(f, f->now + (hm_time_us)600 * 1000 * 1000);
-    HM_ASSERT_EQ(f->nwritten, 0u);
-    HM_ASSERT(hm_session_start_stream(f->s) < HM_OK);
+    run_to(f, f->now + (wr_time_us)600 * 1000 * 1000);
+    WR_ASSERT_EQ(f->nwritten, 0u);
+    WR_ASSERT(wr_session_start_stream(f->s) < WR_OK);
     drain(f);
-    HM_ASSERT_EQ(f->nwritten, 0u);
+    WR_ASSERT_EQ(f->nwritten, 0u);
     fake_close(f);
 }
 
-HM_TEST(an_mtu_of_zero_warns_and_proceeds)
+WR_TEST(an_mtu_of_zero_warns_and_proceeds)
 {
     fake *f = fake_open(NULL);
 
     /* "The platform will not tell me."  Proceeding is right; proceeding
      * silently would make "we did not check" indistinguishable from "we
      * checked and it was fine". */
-    hm_session_on_link_up(f->s, 0, f->now);
+    wr_session_on_link_up(f->s, 0, f->now);
     drain(f);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_MTU_UNKNOWN), 1u);
-    HM_ASSERT_EQ(count_events(f, HM_EV_LINK_UP), 1u);
-    HM_ASSERT_EQ(f->nwritten, 6u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_MTU_UNKNOWN), 1u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_LINK_UP), 1u);
+    WR_ASSERT_EQ(f->nwritten, 6u);
     fake_close(f);
 }
 
-HM_TEST(the_bringup_watchdog_without_versions_takes_the_link_down)
+WR_TEST(the_bringup_watchdog_without_versions_takes_the_link_down)
 {
     fake *f = fake_open(NULL);
-    hm_session_on_link_up(f->s, 247, f->now);
+    wr_session_on_link_up(f->s, 247, f->now);
     drain(f);
 
     /* Everything informational answers; the ONE required step does not. */
     feed(f, k_status, sizeof(k_status));
     feed(f, k_sensor_map, sizeof(k_sensor_map));
-    HM_ASSERT_EQ(count_events(f, HM_EV_READY), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_READY), 0u);
 
-    run_to(f, f->now + (hm_time_us)11 * 1000 * 1000);
-    HM_ASSERT_EQ(count_events(f, HM_EV_READY), 0u);
-    HM_ASSERT_EQ(count_events(f, HM_EV_LINK_DOWN), 1u);
+    run_to(f, f->now + (wr_time_us)11 * 1000 * 1000);
+    WR_ASSERT_EQ(count_events(f, WR_EV_READY), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_LINK_DOWN), 1u);
     fake_close(f);
 }
 
-HM_TEST(the_bringup_watchdog_with_versions_alone_still_reaches_ready)
+WR_TEST(the_bringup_watchdog_with_versions_alone_still_reaches_ready)
 {
     fake *f = fake_open(NULL);
-    hm_session_on_link_up(f->s, 247, f->now);
+    wr_session_on_link_up(f->s, 247, f->now);
     drain(f);
 
     /* §9.1: only step 2 is required, and the library tolerates any of the rest
      * going unanswered.  What it must NOT do is hide which ones did. */
     feed(f, k_versions, sizeof(k_versions));
-    HM_ASSERT_EQ(count_events(f, HM_EV_READY), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_READY), 0u);
 
-    run_to(f, f->now + (hm_time_us)11 * 1000 * 1000);
-    HM_ASSERT_EQ(count_events(f, HM_EV_READY), 1u);
-    HM_ASSERT_EQ(count_events(f, HM_EV_LINK_DOWN), 0u);
+    run_to(f, f->now + (wr_time_us)11 * 1000 * 1000);
+    WR_ASSERT_EQ(count_events(f, WR_EV_READY), 1u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_LINK_DOWN), 0u);
     {
-        const hm_event *ev = find_event(f, HM_EV_DEVICE_INFO);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_DEVICE_INFO);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.device_info.valid, (uint32_t)HM_INFO_VERSIONS);
+            WR_ASSERT_EQ(ev->u.device_info.valid, (uint32_t)WR_INFO_VERSIONS);
         }
     }
     fake_close(f);
@@ -781,16 +781,16 @@ HM_TEST(the_bringup_watchdog_with_versions_alone_still_reaches_ready)
 /* ------------------------------------------------------------------------ */
 /* Increment 2 — the deadline table                                          */
 /* ------------------------------------------------------------------------ */
-HM_TEST(ten_minutes_of_deadlines_terminate_with_strictly_increasing_wakes)
+WR_TEST(ten_minutes_of_deadlines_terminate_with_strictly_increasing_wakes)
 {
-    hm_time_us start;
-    hm_time_us previous;
+    wr_time_us start;
+    wr_time_us previous;
     size_t     writes_at_ready;
     int        wakes = 0;
 
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(count_events(f, HM_EV_READY), 1u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_READY), 1u);
     start = f->now;
     writes_at_ready = f->nwritten;
     previous = f->now;
@@ -802,26 +802,26 @@ HM_TEST(ten_minutes_of_deadlines_terminate_with_strictly_increasing_wakes)
      * CPU, in THEIR code, looking like their bug.
      */
     for (;;) {
-        hm_time_us due = hm_session_next_due_us(f->s);
-        HM_ASSERT(due != HM_TIME_NEVER);
-        if (due == HM_TIME_NEVER || due > start + (hm_time_us)600 * 1000 * 1000) {
+        wr_time_us due = wr_session_next_due_us(f->s);
+        WR_ASSERT(due != WR_TIME_NEVER);
+        if (due == WR_TIME_NEVER || due > start + (wr_time_us)600 * 1000 * 1000) {
             break;
         }
-        HM_ASSERT(due > previous);
+        WR_ASSERT(due > previous);
         previous = due;
         tick_at(f, due);
         wakes++;
-        HM_ASSERT(wakes < 10000); /* the loop must terminate, not merely finish */
+        WR_ASSERT(wakes < 10000); /* the loop must terminate, not merely finish */
     }
 
     /* §9.2: 30 s polls across ten minutes.  Not "about twenty". */
-    HM_ASSERT_EQ(count_writes(f, 0x81, writes_at_ready), 20u);
+    WR_ASSERT_EQ(count_writes(f, 0x81, writes_at_ready), 20u);
     /* The alarm must not fire while the polls are going out on time. */
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_KEEPALIVE_LATE), 0u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_KEEPALIVE_LATE), 0u);
     fake_close(f);
 }
 
-HM_TEST(a_host_that_oversleeps_gets_one_keepalive_not_twenty)
+WR_TEST(a_host_that_oversleeps_gets_one_keepalive_not_twenty)
 {
     size_t writes_at_ready;
 
@@ -837,20 +837,20 @@ HM_TEST(a_host_that_oversleeps_gets_one_keepalive_not_twenty)
      * The dispatcher disarms before it fires and the handler re-arms forward
      * from `now`, which is what makes catching up cheap.
      */
-    tick_at(f, f->now + (hm_time_us)600 * 1000 * 1000);
-    HM_ASSERT_EQ(count_writes(f, 0x81, writes_at_ready), 1u);
+    tick_at(f, f->now + (wr_time_us)600 * 1000 * 1000);
+    WR_ASSERT_EQ(count_writes(f, 0x81, writes_at_ready), 1u);
 
     /* And the missed decade of polls is REPORTED: 600 s of no host→device write
      * against the device's own 300 s idle shutdown (§9.2). */
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_KEEPALIVE_LATE), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_KEEPALIVE_LATE), 1u);
 
     /* Whatever it returns, one tick clears it — so the next one is in the
      * future rather than immediately due again. */
-    HM_ASSERT(hm_session_next_due_us(f->s) > f->now);
+    WR_ASSERT(wr_session_next_due_us(f->s) > f->now);
     fake_close(f);
 }
 
-HM_TEST(a_host_that_never_drains_writes_is_told_the_keepalive_is_late)
+WR_TEST(a_host_that_never_drains_writes_is_told_the_keepalive_is_late)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
@@ -862,70 +862,70 @@ HM_TEST(a_host_that_never_drains_writes_is_told_the_keepalive_is_late)
      * the queue's drain is what marks time.
      */
     f->drain_writes = false;
-    run_to(f, f->now + (hm_time_us)150 * 1000 * 1000);
-    HM_ASSERT(count_warnings(f, HM_WARN_KEEPALIVE_LATE) >= 1u);
+    run_to(f, f->now + (wr_time_us)150 * 1000 * 1000);
+    WR_ASSERT(count_warnings(f, WR_WARN_KEEPALIVE_LATE) >= 1u);
     fake_close(f);
 }
 
 /* ------------------------------------------------------------------------ */
 /* Increment 3 — the stream and the clock                                    */
 /* ------------------------------------------------------------------------ */
-HM_TEST(the_stream_starts_on_the_first_frame_not_on_the_ack)
+WR_TEST(the_stream_starts_on_the_first_frame_not_on_the_ack)
 {
     const uint8_t ack[] = { 0xa0, 0x01 };
 
     fake *f = fake_open(NULL);
     bring_up(f);
 
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(f->written[f->nwritten - 1u][0], 0xa0);
-    HM_ASSERT_EQ(f->written[f->nwritten - 1u][2], HM_CONFIG_OBSERVED_DEFAULT);
-    HM_ASSERT(!hm_session_is_streaming(f->s));
+    WR_ASSERT_EQ(f->written[f->nwritten - 1u][0], 0xa0);
+    WR_ASSERT_EQ(f->written[f->nwritten - 1u][2], WR_CONFIG_OBSERVED_DEFAULT);
+    WR_ASSERT(!wr_session_is_streaming(f->s));
 
     /* ⚠ The vendor app ignores `a0 01` and so do we (§5.1): a start that is
      * acknowledged and produces nothing is a start that failed. */
     feed(f, ack, sizeof(ack));
-    HM_ASSERT_EQ(count_events(f, HM_EV_STREAM_STARTED), 0u);
-    HM_ASSERT(!hm_session_is_streaming(f->s));
+    WR_ASSERT_EQ(count_events(f, WR_EV_STREAM_STARTED), 0u);
+    WR_ASSERT(!wr_session_is_streaming(f->s));
 
     feed_frame(f, 100u, ticks_for(100u), 0);
-    HM_ASSERT_EQ(count_events(f, HM_EV_STREAM_STARTED), 1u);
-    HM_ASSERT(hm_session_is_streaming(f->s));
-    HM_ASSERT_EQ(f->nlive, 1u);
-    HM_ASSERT(hm_session_stream_id(f->s) != 0u);
-    HM_ASSERT_EQ(f->live[0].stream_id, hm_session_stream_id(f->s));
+    WR_ASSERT_EQ(count_events(f, WR_EV_STREAM_STARTED), 1u);
+    WR_ASSERT(wr_session_is_streaming(f->s));
+    WR_ASSERT_EQ(f->nlive, 1u);
+    WR_ASSERT(wr_session_stream_id(f->s) != 0u);
+    WR_ASSERT_EQ(f->live[0].stream_id, wr_session_stream_id(f->s));
     fake_close(f);
 }
 
-HM_TEST(a_stream_that_never_starts_times_out_and_is_not_retried)
+WR_TEST(a_stream_that_never_starts_times_out_and_is_not_retried)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
 
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     {
         size_t starts_before = count_writes(f, 0xa0, 0u);
-        HM_ASSERT_EQ(starts_before, 1u);
+        WR_ASSERT_EQ(starts_before, 1u);
 
         /* §6.1 measures the first frame at 50-80 ms, so 3 s is two orders of
          * margin: anything approaching it means the start was not accepted. */
-        run_to(f, f->now + (hm_time_us)4 * 1000 * 1000);
-        HM_ASSERT_EQ(count_warnings(f, HM_WARN_STREAM_START_TIMEOUT), 1u);
-        HM_ASSERT(!hm_session_is_streaming(f->s));
+        run_to(f, f->now + (wr_time_us)4 * 1000 * 1000);
+        WR_ASSERT_EQ(count_warnings(f, WR_WARN_STREAM_START_TIMEOUT), 1u);
+        WR_ASSERT(!wr_session_is_streaming(f->s));
 
         /* ⚠ No silent retry: a start that failed once will fail again, and the
          * consumer needs to see it rather than a queue of `a0`s. */
-        run_to(f, f->now + (hm_time_us)20 * 1000 * 1000);
-        HM_ASSERT_EQ(count_writes(f, 0xa0, 0u), 1u);
+        run_to(f, f->now + (wr_time_us)20 * 1000 * 1000);
+        WR_ASSERT_EQ(count_writes(f, 0xa0, 0u), 1u);
     }
     fake_close(f);
 }
 
-HM_TEST(two_thousand_jittered_frames_fit_a_plausible_rate_that_is_not_800)
+WR_TEST(two_thousand_jittered_frames_fit_a_plausible_rate_that_is_not_800)
 {
-    hm_time_us t0;
+    wr_time_us t0;
     /* The truth the fake device is built from.  ⚠ 799.2, never a round 800:
      * §6.5 measured 799.19 and 799.32 Hz on two independent host clocks. */
     const double true_rate_hz = 799.2;
@@ -936,7 +936,7 @@ HM_TEST(two_thousand_jittered_frames_fit_a_plausible_rate_that_is_not_800)
 
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     t0 = f->now;
     live_before = f->nlive;
@@ -945,84 +945,84 @@ HM_TEST(two_thousand_jittered_frames_fit_a_plausible_rate_that_is_not_800)
         uint32_t index = (uint32_t)(i * step);
         /* ⚠ BLE delay is ONE-SIDED — a notification can be late, never early —
          * which is why the fit is a lower envelope and not least squares. */
-        hm_time_us jitter = 200 + (hm_time_us)((i * 7919) % 5000);
-        f->now = t0 + (hm_time_us)((double)index / true_rate_hz * 1e6) + jitter;
-        hm_session_tick(f->s, f->now);
+        wr_time_us jitter = 200 + (wr_time_us)((i * 7919) % 5000);
+        f->now = t0 + (wr_time_us)((double)index / true_rate_hz * 1e6) + jitter;
+        wr_session_tick(f->s, f->now);
         feed_frame(f, (uint16_t)(index & 0xffffu), ticks_for(index), 0);
     }
 
-    HM_ASSERT_EQ(f->nlive - live_before, (size_t)frames);
+    WR_ASSERT_EQ(f->nlive - live_before, (size_t)frames);
 
     /* The index space wraps every 82.0 s at this rate, and 2000 × 32 crosses
      * 65536 — the unwrapped counter must not care. */
-    HM_ASSERT_EQ(f->live[f->nlive - 1u].sample_index, (uint32_t)((frames - 1) * step));
+    WR_ASSERT_EQ(f->live[f->nlive - 1u].sample_index, (uint32_t)((frames - 1) * step));
 
     {
-        hm_clock_snapshot snap;
-        HM_ASSERT_EQ(hm_session_clock(f->s, &snap), HM_OK);
-        HM_ASSERT((snap.flags & (uint32_t)HM_CLOCK_HAS_FIT) != 0u);
-        HM_ASSERT((snap.flags & (uint32_t)HM_CLOCK_SHORT_BASELINE) == 0u);
-        HM_ASSERT(snap.fitted_rate_hz > HM_RATE_PLAUSIBLE_MIN_HZ);
-        HM_ASSERT(snap.fitted_rate_hz < HM_RATE_PLAUSIBLE_MAX_HZ);
-        HM_ASSERT_NEAR(snap.fitted_rate_hz, true_rate_hz, 0.5);
+        wr_clock_snapshot snap;
+        WR_ASSERT_EQ(wr_session_clock(f->s, &snap), WR_OK);
+        WR_ASSERT((snap.flags & (uint32_t)WR_CLOCK_HAS_FIT) != 0u);
+        WR_ASSERT((snap.flags & (uint32_t)WR_CLOCK_SHORT_BASELINE) == 0u);
+        WR_ASSERT(snap.fitted_rate_hz > WR_RATE_PLAUSIBLE_MIN_HZ);
+        WR_ASSERT(snap.fitted_rate_hz < WR_RATE_PLAUSIBLE_MAX_HZ);
+        WR_ASSERT_NEAR(snap.fitted_rate_hz, true_rate_hz, 0.5);
         /* ⚠ And it is NOT 800.  Assuming 800 costs ≈1,000 ppm — 45 ms after
          * 45 s, which is 11 frames at 240 fps — and silently degenerates the
          * estimator onto one end-of-session point. */
-        HM_ASSERT(fabs(snap.fitted_rate_hz - 800.0) > 0.3);
+        WR_ASSERT(fabs(snap.fitted_rate_hz - 800.0) > 0.3);
     }
 
     for (size_t i = live_before; i < f->nlive; ++i) {
-        const hm_sample *sm = &f->live[i];
+        const wr_sample *sm = &f->live[i];
 
         /* ⚠ host_time_us is the FIT applied to the index, not the arrival
          * instant.  Arrival is what the fit is built from and is one-sidedly
          * late; mapping straight from it puts every swing late by the mean
          * link delay. */
-        HM_ASSERT(sm->host_time_us <= sm->host_recv_us);
+        WR_ASSERT(sm->host_time_us <= sm->host_recv_us);
         if (sm->host_time_us != sm->host_recv_us) {
             differ++;
         }
 
         /* Device time comes from the frame alone (§10.2) and never waits for
          * the fit. */
-        HM_ASSERT(sm->lower_arm.device_time_us != HM_TIME_UNKNOWN);
-        HM_ASSERT(sm->palm.device_time_us != HM_TIME_UNKNOWN);
+        WR_ASSERT(sm->lower_arm.device_time_us != WR_TIME_UNKNOWN);
+        WR_ASSERT(sm->palm.device_time_us != WR_TIME_UNKNOWN);
         if (i > live_before) {
-            HM_ASSERT(sm->lower_arm.device_time_us > f->live[i - 1u].lower_arm.device_time_us);
-            HM_ASSERT(sm->palm.device_time_us > f->live[i - 1u].palm.device_time_us);
+            WR_ASSERT(sm->lower_arm.device_time_us > f->live[i - 1u].lower_arm.device_time_us);
+            WR_ASSERT(sm->palm.device_time_us > f->live[i - 1u].palm.device_time_us);
         }
 
         /* §10.3's 59 ticks is 0.92 ms, and it is carried rather than silently
          * treated as zero: at 1,000 °/s it is worth ~0.9° of relative angle. */
-        HM_ASSERT(sm->skew_us > 900 && sm->skew_us < 945);
+        WR_ASSERT(sm->skew_us > 900 && sm->skew_us < 945);
 
-        HM_ASSERT_EQ(sm->source, (uint8_t)HM_SOURCE_LIVE);
-        HM_ASSERT_EQ(sm->calibration, (uint8_t)HM_CAL_UNCALIBRATED);
-        HM_ASSERT_EQ(sm->config_bits, HM_CONFIG_OBSERVED_DEFAULT);
-        HM_ASSERT((sm->flags & (uint16_t)HM_SAMPLE_QUAT_NORM_SUSPECT) == 0u);
+        WR_ASSERT_EQ(sm->source, (uint8_t)WR_SOURCE_LIVE);
+        WR_ASSERT_EQ(sm->calibration, (uint8_t)WR_CAL_UNCALIBRATED);
+        WR_ASSERT_EQ(sm->config_bits, WR_CONFIG_OBSERVED_DEFAULT);
+        WR_ASSERT((sm->flags & (uint16_t)WR_SAMPLE_QUAT_NORM_SUSPECT) == 0u);
     }
     /* ⚠ Assert the count, not merely the absence of a mismatch: "every sample
      * agreed" over zero samples reads identically to a check that stopped
      * running.  The handful of exceptions are the fit's own support points,
      * where the envelope line touches an observation by construction. */
-    HM_ASSERT(differ >= (size_t)frames - 32);
+    WR_ASSERT(differ >= (size_t)frames - 32);
 
     /* The clock event carries the snapshot, once a second, while the fit has
      * observations to report. */
-    HM_ASSERT(count_events(f, HM_EV_CLOCK_UPDATED) > 1u);
+    WR_ASSERT(count_events(f, WR_EV_CLOCK_UPDATED) > 1u);
     fake_close(f);
 }
 
-HM_TEST(a_live_ring_that_overflows_says_so)
+WR_TEST(a_live_ring_that_overflows_says_so)
 {
-    static hm_sample  small[8];
-    hm_session_config cfg = hm_session_config_default();
+    static wr_sample  small[8];
+    wr_session_config cfg = wr_session_config_default();
 
     cfg.memory.live_ring = small;
     cfg.memory.live_ring_capacity = 8u;
     fake *f = fake_open(&cfg);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     f->drain_writes = false; /* stop draining anything at all */
 
     for (uint32_t i = 0; i < 20u; ++i) {
@@ -1033,16 +1033,16 @@ HM_TEST(a_live_ring_that_overflows_says_so)
         idx[0] = (uint16_t)(i * 8u);
         tk[0] = ticks_for(i * 8u);
         n = build_frame(buf, idx, tk, 1u, 0);
-        hm_session_on_bytes(f->s, buf, n, f->now + (hm_time_us)i * 1000);
+        wr_session_on_bytes(f->s, buf, n, f->now + (wr_time_us)i * 1000);
     }
 
     /* Drop-oldest, and COUNTED: a host that is not keeping up must be able to
      * see that data was lost rather than infer it from a gap. */
-    HM_ASSERT_EQ(hm_session_dropped_live(f->s), 12u);
+    WR_ASSERT_EQ(wr_session_dropped_live(f->s), 12u);
     {
-        hm_sample out[32];
-        HM_ASSERT_EQ(hm_session_poll_live(f->s, out, 32u), 8u);
-        HM_ASSERT_EQ(out[0].sample_index, 96u); /* the newest eight survive */
+        wr_sample out[32];
+        WR_ASSERT_EQ(wr_session_poll_live(f->s, out, 32u), 8u);
+        WR_ASSERT_EQ(out[0].sample_index, 96u); /* the newest eight survive */
     }
     fake_close(f);
 }
@@ -1050,11 +1050,11 @@ HM_TEST(a_live_ring_that_overflows_says_so)
 /* ------------------------------------------------------------------------ */
 /* The bracket discriminator — live and history frames are byte-identical    */
 /* ------------------------------------------------------------------------ */
-HM_TEST(an_orphan_bracket_reaches_neither_the_live_ring_nor_the_fit)
+WR_TEST(an_orphan_bracket_reaches_neither_the_live_ring_nor_the_fit)
 {
     const uint8_t     mark_start[] = { 0xa1, 0x02 };
     const uint8_t     mark_end[] = { 0xa1, 0x01 };
-    hm_session_config cfg = hm_session_config_default();
+    wr_session_config cfg = wr_session_config_default();
     int32_t           observations_before;
     size_t            live_before;
     size_t            writes_before;
@@ -1062,11 +1062,11 @@ HM_TEST(an_orphan_bracket_reaches_neither_the_live_ring_nor_the_fit)
     /* A 5 s poll so the keepalive is genuinely DUE inside the bracket: with the
      * measured-good 30 s it would not be, and the suppression below would pass
      * without ever having been exercised. */
-    cfg.policy.keepalive_period_us = (hm_time_us)5 * 1000 * 1000;
+    cfg.policy.keepalive_period_us = (wr_time_us)5 * 1000 * 1000;
 
     fake *f = fake_open(&cfg);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
 
     for (uint32_t i = 0; i < 10u; ++i) {
@@ -1075,8 +1075,8 @@ HM_TEST(an_orphan_bracket_reaches_neither_the_live_ring_nor_the_fit)
     }
     live_before = f->nlive;
     {
-        hm_clock_snapshot snap;
-        (void)hm_session_clock(f->s, &snap);
+        wr_clock_snapshot snap;
+        (void)wr_session_clock(f->s, &snap);
         observations_before = snap.observations;
     }
 
@@ -1093,7 +1093,7 @@ HM_TEST(an_orphan_bracket_reaches_neither_the_live_ring_nor_the_fit)
     for (uint32_t i = 0; i < 200u; ++i) {
         feed_frame(f, (uint16_t)(38000u + i), ticks_for(38000u + i), 0);
     }
-    HM_ASSERT_EQ(f->nlive, live_before);
+    WR_ASSERT_EQ(f->nlive, live_before);
 
     /*
      * ⚠ And the quiet period holds: TWO keepalives fall due across this span
@@ -1102,15 +1102,15 @@ HM_TEST(an_orphan_bracket_reaches_neither_the_live_ring_nor_the_fit)
      * record stream that has no length field, no sequence number and no
      * checksum is the worst failure this protocol admits.
      */
-    run_to(f, f->now + (hm_time_us)12 * 1000 * 1000);
-    HM_ASSERT_EQ(count_writes(f, 0x81, writes_before), 0u);
+    run_to(f, f->now + (wr_time_us)12 * 1000 * 1000);
+    WR_ASSERT_EQ(count_writes(f, 0x81, writes_before), 0u);
 
     feed(f, mark_end, sizeof(mark_end));
 
     /* The `a1` write itself served the device's idle timer when the bracket
      * opened, and the keepalive is re-armed from the close. */
-    run_to(f, f->now + (hm_time_us)6 * 1000 * 1000);
-    HM_ASSERT(count_writes(f, 0x81, writes_before) >= 1u);
+    run_to(f, f->now + (wr_time_us)6 * 1000 * 1000);
+    WR_ASSERT(count_writes(f, 0x81, writes_before) >= 1u);
 
     /*
      * ⚠ And the suspension is REPORTED.  Nothing on the wire marks the span
@@ -1119,11 +1119,11 @@ HM_TEST(an_orphan_bracket_reaches_neither_the_live_ring_nor_the_fit)
      * never delivered from one that was never requested.
      */
     {
-        const hm_event *ev = find_event(f, HM_EV_HISTORY_BLIND_SPAN);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_HISTORY_BLIND_SPAN);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.history_blind_span.request_id, 0u); /* we never asked */
-            HM_ASSERT(ev->u.history_blind_span.span.end_us >
+            WR_ASSERT_EQ(ev->u.history_blind_span.request_id, 0u); /* we never asked */
+            WR_ASSERT(ev->u.history_blind_span.span.end_us >
                       ev->u.history_blind_span.span.start_us);
         }
     }
@@ -1132,8 +1132,8 @@ HM_TEST(an_orphan_bracket_reaches_neither_the_live_ring_nor_the_fit)
      * by a retrieval, and only the host mapping restarts. */
     f->now += 40000;
     feed_frame(f, (uint16_t)(40000u + 10u * 32u), ticks_for(40000u + 10u * 32u), 0);
-    HM_ASSERT_EQ(f->nlive, live_before + 1u);
-    HM_ASSERT_EQ(f->live[f->nlive - 1u].sample_index, 40000u + 10u * 32u);
+    WR_ASSERT_EQ(f->nlive, live_before + 1u);
+    WR_ASSERT_EQ(f->live[f->nlive - 1u].sample_index, 40000u + 10u * 32u);
 
     /*
      * ⚠ AND THE FIT RE-ANCHORED ACROSS THE BRACKET (design §6.1.1), which is
@@ -1152,27 +1152,27 @@ HM_TEST(an_orphan_bracket_reaches_neither_the_live_ring_nor_the_fit)
      * not anybody was waiting for the records.
      */
     {
-        hm_clock_snapshot snap;
-        HM_ASSERT(observations_before > 1);
-        (void)hm_session_clock(f->s, &snap);
-        HM_ASSERT_EQ(snap.observations, 1);
+        wr_clock_snapshot snap;
+        WR_ASSERT(observations_before > 1);
+        (void)wr_session_clock(f->s, &snap);
+        WR_ASSERT_EQ(snap.observations, 1);
         /* Still usable from the very first frame of the new stretch, with the
          * rate seeded rather than refitted — one offset per stretch, one rate
          * per connection. */
-        HM_ASSERT((snap.flags & (uint32_t)HM_CLOCK_HAS_FIT) != 0u);
-        HM_ASSERT((snap.flags & (uint32_t)HM_CLOCK_BLIND) == 0u);
-        HM_ASSERT(f->live[f->nlive - 1u].host_time_us != HM_TIME_UNKNOWN);
+        WR_ASSERT((snap.flags & (uint32_t)WR_CLOCK_HAS_FIT) != 0u);
+        WR_ASSERT((snap.flags & (uint32_t)WR_CLOCK_BLIND) == 0u);
+        WR_ASSERT(f->live[f->nlive - 1u].host_time_us != WR_TIME_UNKNOWN);
     }
     fake_close(f);
 }
 
-HM_TEST(the_bracket_limit_closes_a_bracket_the_device_never_closed)
+WR_TEST(the_bracket_limit_closes_a_bracket_the_device_never_closed)
 {
     const uint8_t     mark_start[] = { 0xa1, 0x02 };
-    hm_session_config cfg = hm_session_config_default();
+    wr_session_config cfg = wr_session_config_default();
     size_t            writes_before;
 
-    cfg.policy.keepalive_period_us = (hm_time_us)5 * 1000 * 1000;
+    cfg.policy.keepalive_period_us = (wr_time_us)5 * 1000 * 1000;
 
     fake *f = fake_open(&cfg);
     bring_up(f);
@@ -1182,8 +1182,8 @@ HM_TEST(the_bracket_limit_closes_a_bracket_the_device_never_closed)
     /* Suppressed while the bracket is open — deliberately, and affordably: a
      * retrieval is bounded by the ~7.5 s buffer depth against a 300 s idle
      * shutdown, two orders of magnitude of headroom. */
-    run_to(f, f->now + (hm_time_us)12 * 1000 * 1000);
-    HM_ASSERT_EQ(count_writes(f, 0x81, writes_before), 0u);
+    run_to(f, f->now + (wr_time_us)12 * 1000 * 1000);
+    WR_ASSERT_EQ(count_writes(f, 0x81, writes_before), 0u);
 
     /*
      * ⚠ But a bracket that never closes would hold the queue until the device
@@ -1191,61 +1191,61 @@ HM_TEST(the_bracket_limit_closes_a_bracket_the_device_never_closed)
      * twice the buffer depth (15 s) and is independent of any request's
      * deadline — a marker whose end never arrives is not a slow pull.
      */
-    run_to(f, f->now + (hm_time_us)10 * 1000 * 1000);
-    HM_ASSERT(count_writes(f, 0x81, writes_before) >= 1u);
+    run_to(f, f->now + (wr_time_us)10 * 1000 * 1000);
+    WR_ASSERT(count_writes(f, 0x81, writes_before) >= 1u);
     /* The suspension is reported rather than merely ended. */
-    HM_ASSERT_EQ(count_events(f, HM_EV_HISTORY_BLIND_SPAN), 1u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_HISTORY_BLIND_SPAN), 1u);
     fake_close(f);
 }
 
 /* ------------------------------------------------------------------------ */
 /* Link loss                                                                 */
 /* ------------------------------------------------------------------------ */
-HM_TEST(link_down_always_invalidates_calibration)
+WR_TEST(link_down_always_invalidates_calibration)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
 
-    hm_session_on_link_down(f->s, HM_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
+    wr_session_on_link_down(f->s, WR_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
     drain(f);
     {
-        const hm_event *ev = find_event(f, HM_EV_LINK_DOWN);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_LINK_DOWN);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
             /*
              * ⚠ ALWAYS 1.  §8.3 measured 0.70° immediately before dropping a
              * link and 18.80° at the same pose after reconnecting, strap
              * untouched and never removed.
              */
-            HM_ASSERT_EQ(ev->u.link_down.calibration_invalidated, 1);
-            HM_ASSERT_EQ(ev->u.link_down.advice, (uint8_t)HM_RECOVER_RECONNECT_WITH_BACKOFF);
-            HM_ASSERT(ev->u.link_down.suggested_retry_delay_us > 0);
+            WR_ASSERT_EQ(ev->u.link_down.calibration_invalidated, 1);
+            WR_ASSERT_EQ(ev->u.link_down.advice, (uint8_t)WR_RECOVER_RECONNECT_WITH_BACKOFF);
+            WR_ASSERT(ev->u.link_down.suggested_retry_delay_us > 0);
         }
     }
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNCALIBRATED);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNCALIBRATED);
     /* Nothing is due once the link is gone: the host may sleep until it has
      * something to say. */
-    HM_ASSERT(hm_session_next_due_us(f->s) == HM_TIME_NEVER);
+    WR_ASSERT(wr_session_next_due_us(f->s) == WR_TIME_NEVER);
     fake_close(f);
 }
 
-HM_TEST(link_down_is_classified_rather_than_retried)
+WR_TEST(link_down_is_classified_rather_than_retried)
 {
     /* ⚠ Retrying against a slept device cannot succeed at any interval (§9.6).
      * The discriminators are available to the library and to nobody above it. */
     {
         fake *f = fake_open(NULL);
         bring_up(f);
-        hm_session_on_link_down(f->s, HM_LINK_DOWN_CONNECTION_TAKEN, f->now + 1000);
+        wr_session_on_link_down(f->s, WR_LINK_DOWN_CONNECTION_TAKEN, f->now + 1000);
         drain(f);
         {
-            const hm_event *ev = find_event(f, HM_EV_LINK_DOWN);
-            HM_ASSERT(ev != NULL);
+            const wr_event *ev = find_event(f, WR_EV_LINK_DOWN);
+            WR_ASSERT(ev != NULL);
             if (ev != NULL) {
                 /* The device accepts ONE connection and the vendor app wins the
                  * race if it is running (§2.2). */
-                HM_ASSERT_EQ(ev->u.link_down.advice, (uint8_t)HM_RECOVER_NEEDS_OTHER_APP_CLOSED);
-                HM_ASSERT_EQ(ev->u.link_down.suggested_retry_delay_us, 0);
+                WR_ASSERT_EQ(ev->u.link_down.advice, (uint8_t)WR_RECOVER_NEEDS_OTHER_APP_CLOSED);
+                WR_ASSERT_EQ(ev->u.link_down.suggested_retry_delay_us, 0);
             }
         }
         fake_close(f);
@@ -1256,16 +1256,16 @@ HM_TEST(link_down_is_classified_rather_than_retried)
         /* No host write for 4.5 of the device's 5.0 idle minutes: it has almost
          * certainly slept, and only a physical button press brings it back. */
         f->drain_writes = false;
-        f->now += (hm_time_us)280 * 1000 * 1000;
-        hm_session_on_link_down(f->s, HM_LINK_DOWN_SUPERVISION_TIMEOUT, f->now);
+        f->now += (wr_time_us)280 * 1000 * 1000;
+        wr_session_on_link_down(f->s, WR_LINK_DOWN_SUPERVISION_TIMEOUT, f->now);
         f->drain_writes = true;
         drain(f);
         {
-            const hm_event *ev = find_event(f, HM_EV_LINK_DOWN);
-            HM_ASSERT(ev != NULL);
+            const wr_event *ev = find_event(f, WR_EV_LINK_DOWN);
+            WR_ASSERT(ev != NULL);
             if (ev != NULL) {
-                HM_ASSERT_EQ(ev->u.link_down.advice, (uint8_t)HM_RECOVER_NEEDS_BUTTON_PRESS);
-                HM_ASSERT_EQ(ev->u.link_down.suggested_retry_delay_us, 0);
+                WR_ASSERT_EQ(ev->u.link_down.advice, (uint8_t)WR_RECOVER_NEEDS_BUTTON_PRESS);
+                WR_ASSERT_EQ(ev->u.link_down.suggested_retry_delay_us, 0);
             }
         }
         fake_close(f);
@@ -1275,53 +1275,53 @@ HM_TEST(link_down_is_classified_rather_than_retried)
         bring_up(f);
         /* A device that is still advertising did not go to sleep — and it will
          * stop advertising within seconds, so this retry is the urgent one. */
-        hm_session_on_advertising_seen(f->s, f->now);
-        hm_session_on_link_down(f->s, HM_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
+        wr_session_on_advertising_seen(f->s, f->now);
+        wr_session_on_link_down(f->s, WR_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
         drain(f);
         {
-            const hm_event *ev = find_event(f, HM_EV_LINK_DOWN);
-            HM_ASSERT(ev != NULL);
+            const wr_event *ev = find_event(f, WR_EV_LINK_DOWN);
+            WR_ASSERT(ev != NULL);
             if (ev != NULL) {
-                HM_ASSERT_EQ(ev->u.link_down.advice,
-                             (uint8_t)HM_RECOVER_RECONNECT_WITH_BACKOFF);
-                HM_ASSERT(ev->u.link_down.suggested_retry_delay_us > 0);
-                HM_ASSERT(ev->u.link_down.suggested_retry_delay_us <= 250000);
+                WR_ASSERT_EQ(ev->u.link_down.advice,
+                             (uint8_t)WR_RECOVER_RECONNECT_WITH_BACKOFF);
+                WR_ASSERT(ev->u.link_down.suggested_retry_delay_us > 0);
+                WR_ASSERT(ev->u.link_down.suggested_retry_delay_us <= 250000);
             }
         }
         fake_close(f);
     }
 }
 
-HM_TEST(power_off_lingers_and_advises_against_retrying)
+WR_TEST(power_off_lingers_and_advises_against_retrying)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 10u, ticks_for(10u), 0);
 
-    HM_ASSERT_EQ(hm_session_power_off(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_power_off(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(f->written[f->nwritten - 1u][0], 0xfa);
+    WR_ASSERT_EQ(f->written[f->nwritten - 1u][0], 0xfa);
 
     /*
      * ⚠ §9.3: no acknowledgement is ever sent and the link stays up for ~9 s.
      * The session expects the gap, does not read it as failure, and does not
      * retry into it.
      */
-    run_to(f, f->now + (hm_time_us)8 * 1000 * 1000);
-    HM_ASSERT_EQ(count_events(f, HM_EV_LINK_DOWN), 0u);
-    HM_ASSERT_EQ(count_writes(f, 0xfa, 0u), 1u);
+    run_to(f, f->now + (wr_time_us)8 * 1000 * 1000);
+    WR_ASSERT_EQ(count_events(f, WR_EV_LINK_DOWN), 0u);
+    WR_ASSERT_EQ(count_writes(f, 0xfa, 0u), 1u);
 
-    /* HM_POWER_OFF_LINGER_US is 12 s: deliberate margin over one 9 s
+    /* WR_POWER_OFF_LINGER_US is 12 s: deliberate margin over one 9 s
      * measurement, not a transcription of it. */
-    run_to(f, f->now + (hm_time_us)6 * 1000 * 1000);
+    run_to(f, f->now + (wr_time_us)6 * 1000 * 1000);
     {
-        const hm_event *ev = find_event(f, HM_EV_LINK_DOWN);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_LINK_DOWN);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.link_down.advice, (uint8_t)HM_RECOVER_DO_NOT_RETRY);
-            HM_ASSERT_EQ(ev->u.link_down.suggested_retry_delay_us, 0);
+            WR_ASSERT_EQ(ev->u.link_down.advice, (uint8_t)WR_RECOVER_DO_NOT_RETRY);
+            WR_ASSERT_EQ(ev->u.link_down.suggested_retry_delay_us, 0);
         }
     }
     fake_close(f);
@@ -1337,9 +1337,9 @@ HM_TEST(power_off_lingers_and_advises_against_retrying)
  * implementation-review I4.  The unit test in test_device.c asks the predicate
  * about a type; this asks the SESSION what it actually puts on the wire to a
  * consumer, which is where the miss was: `enter_ready()` ships the whole
- * `hm_device_info` under HM_EV_DEVICE_INFO, and bring-up does not reach READY
+ * `wr_device_info` under WR_EV_DEVICE_INFO, and bring-up does not reach READY
  * until the MAC and serial have landed in it, so that event carries both every
- * single time.  `hm_event_is_sensitive()` said no.
+ * single time.  `wr_event_is_sensitive()` said no.
  *
  * ⚠ Design §9.2 names three mechanisms and this is the one a binding's
  * serialisation and a consumer's telemetry filter on.  The other two — the
@@ -1347,7 +1347,7 @@ HM_TEST(power_off_lingers_and_advises_against_retrying)
  * the formatter happens not to print those fields for this type, which is
  * exactly why it looked fine.
  */
-HM_TEST(every_bring_up_event_carrying_an_identifier_says_so)
+WR_TEST(every_bring_up_event_carrying_an_identifier_says_so)
 {
     fake  *f = fake_open(NULL);
     size_t carriers = 0;
@@ -1355,10 +1355,10 @@ HM_TEST(every_bring_up_event_carrying_an_identifier_says_so)
     bring_up(f);
 
     for (size_t i = 0; i < f->nevents; ++i) {
-        const hm_event *ev = &f->events[i];
+        const wr_event *ev = &f->events[i];
         bool            has_id = false;
 
-        if (ev->type != (uint16_t)HM_EV_DEVICE_INFO && ev->type != (uint16_t)HM_EV_IDENTITY) {
+        if (ev->type != (uint16_t)WR_EV_DEVICE_INFO && ev->type != (uint16_t)WR_EV_IDENTITY) {
             continue;
         }
         has_id = ev->u.device_info.mac[0] != '\0' || ev->u.device_info.serial[0] != '\0';
@@ -1366,23 +1366,23 @@ HM_TEST(every_bring_up_event_carrying_an_identifier_says_so)
             continue;
         }
         carriers++;
-        HM_ASSERT_MSG(hm_event_is_sensitive(ev),
+        WR_ASSERT_MSG(wr_event_is_sensitive(ev),
                       "an event whose payload holds a MAC or a serial must be "
                       "filterable by the mechanism design §9.2 points at");
     }
 
     /* ⚠ And the count, because "none of zero events leaked" reads identically to
      * "nothing was checked" — which is the failure this library is built around. */
-    HM_ASSERT_MSG(carriers >= 3u,
+    WR_ASSERT_MSG(carriers >= 3u,
                   "bring-up must emit the identity events AND the device-info "
                   "event that quietly repeats them");
     fake_close(f);
 }
 
-HM_TEST(identifiers_are_redacted_in_the_wire_log_unless_asked_for)
+WR_TEST(identifiers_are_redacted_in_the_wire_log_unless_asked_for)
 {
-    static hm_wire_chunk chunks[64];
-    hm_session_config    cfg = hm_session_config_default();
+    static wr_wire_chunk chunks[64];
+    wr_session_config    cfg = wr_session_config_default();
     size_t               redacted = 0;
     size_t               mac_chunks = 0;
 
@@ -1392,7 +1392,7 @@ HM_TEST(identifiers_are_redacted_in_the_wire_log_unless_asked_for)
     bring_up(f);
 
     for (size_t i = 0; i < f->nwire; ++i) {
-        if (f->wire[i].direction != (uint8_t)HM_WIRE_DEVICE_TO_HOST) {
+        if (f->wire[i].direction != (uint8_t)WR_WIRE_DEVICE_TO_HOST) {
             continue;
         }
         if (f->wire[i].length > 0u && f->wire[i].data[0] == 0x85) {
@@ -1400,21 +1400,21 @@ HM_TEST(identifiers_are_redacted_in_the_wire_log_unless_asked_for)
             /* ⚠ The id survives so a reader can see WHAT was removed; the
              * payload does not.  Marked, so absent and redacted stay
              * distinguishable (api-request §2.13). */
-            HM_ASSERT((f->wire[i].flags & (uint8_t)HM_WIRE_REDACTED) != 0u);
-            HM_ASSERT_EQ(f->wire[i].length, sizeof(k_mac));
-            HM_ASSERT_EQ(f->wire[i].data[1], 0);
+            WR_ASSERT((f->wire[i].flags & (uint8_t)WR_WIRE_REDACTED) != 0u);
+            WR_ASSERT_EQ(f->wire[i].length, sizeof(k_mac));
+            WR_ASSERT_EQ(f->wire[i].data[1], 0);
         }
-        if ((f->wire[i].flags & (uint8_t)HM_WIRE_REDACTED) != 0u) {
+        if ((f->wire[i].flags & (uint8_t)WR_WIRE_REDACTED) != 0u) {
             redacted++;
         }
     }
-    HM_ASSERT_EQ(mac_chunks, 1u);
-    HM_ASSERT_EQ(redacted, 2u); /* MAC and serial */
+    WR_ASSERT_EQ(mac_chunks, 1u);
+    WR_ASSERT_EQ(redacted, 2u); /* MAC and serial */
     fake_close(f);
 
     {
-        static hm_wire_chunk chunks2[64];
-        hm_session_config    cfg2 = hm_session_config_default();
+        static wr_wire_chunk chunks2[64];
+        wr_session_config    cfg2 = wr_session_config_default();
         bool                 saw_mac_bytes = false;
 
         cfg2.memory.wire_ring = chunks2;
@@ -1425,44 +1425,44 @@ HM_TEST(identifiers_are_redacted_in_the_wire_log_unless_asked_for)
         for (size_t i = 0; i < g->nwire; ++i) {
             /* ⚠ The host's own `85` REQUEST is one byte and also starts 0x85;
              * it is the device's REPLY that carries the identifier. */
-            if (g->wire[i].direction != (uint8_t)HM_WIRE_DEVICE_TO_HOST) {
+            if (g->wire[i].direction != (uint8_t)WR_WIRE_DEVICE_TO_HOST) {
                 continue;
             }
             if (g->wire[i].length > 0u && g->wire[i].data[0] == 0x85) {
-                HM_ASSERT((g->wire[i].flags & (uint8_t)HM_WIRE_REDACTED) == 0u);
-                HM_ASSERT_EQ(g->wire[i].data[1], 'A');
+                WR_ASSERT((g->wire[i].flags & (uint8_t)WR_WIRE_REDACTED) == 0u);
+                WR_ASSERT_EQ(g->wire[i].data[1], 'A');
                 saw_mac_bytes = true;
             }
         }
-        HM_ASSERT(saw_mac_bytes);
+        WR_ASSERT(saw_mac_bytes);
         fake_close(g);
     }
 }
 
-HM_TEST(the_wire_log_marks_loss_and_carries_its_own_sequence)
+WR_TEST(the_wire_log_marks_loss_and_carries_its_own_sequence)
 {
-    static hm_wire_chunk chunks[8];
-    hm_session_config    cfg = hm_session_config_default();
+    static wr_wire_chunk chunks[8];
+    wr_session_config    cfg = wr_session_config_default();
 
     cfg.memory.wire_ring = chunks;
     cfg.memory.wire_ring_capacity = 8u;
     fake *f = fake_open(&cfg);
-    hm_session_on_link_up(f->s, 247, f->now);
+    wr_session_on_link_up(f->s, 247, f->now);
     /* Never drain the wire ring, so it overflows. */
     for (int i = 0; i < 30; ++i) {
-        hm_session_on_bytes(f->s, k_status, sizeof(k_status), f->now + i * 1000);
+        wr_session_on_bytes(f->s, k_status, sizeof(k_status), f->now + i * 1000);
     }
-    HM_ASSERT(hm_session_dropped_wire(f->s) > 0u);
+    WR_ASSERT(wr_session_dropped_wire(f->s) > 0u);
     {
-        hm_wire_chunk out[8];
-        size_t        n = hm_session_poll_wire(f->s, out, 8u);
-        HM_ASSERT_EQ(n, 8u);
+        wr_wire_chunk out[8];
+        size_t        n = wr_session_poll_wire(f->s, out, 8u);
+        WR_ASSERT_EQ(n, 8u);
         /* ⚠ The chunk that FOLLOWS the loss is marked, and `sequence` is
          * carried rather than renumbered — a reader numbering from its own
          * ordinal would turn a lossy recording into a complete-looking one. */
-        HM_ASSERT((out[0].flags & (uint8_t)HM_WIRE_LOST) != 0u);
-        HM_ASSERT(out[0].sequence > 0u);
-        HM_ASSERT_EQ(out[7].sequence, out[0].sequence + 7u);
+        WR_ASSERT((out[0].flags & (uint8_t)WR_WIRE_LOST) != 0u);
+        WR_ASSERT(out[0].sequence > 0u);
+        WR_ASSERT_EQ(out[7].sequence, out[0].sequence + 7u);
     }
     fake_close(f);
 }
@@ -1470,7 +1470,7 @@ HM_TEST(the_wire_log_marks_loss_and_carries_its_own_sequence)
 /* ------------------------------------------------------------------------ */
 /* Oddments that must not be silent                                          */
 /* ------------------------------------------------------------------------ */
-HM_TEST(an_unknown_message_is_logged_and_ignored)
+WR_TEST(an_unknown_message_is_logged_and_ignored)
 {
     const uint8_t junk[] = { 0x77, 0x01, 0x02, 0x03 };
 
@@ -1482,18 +1482,18 @@ HM_TEST(an_unknown_message_is_logged_and_ignored)
      * as an error — the range is sparse and the table is scoped to what a
      * client uses, not to every byte the device could emit. */
     {
-        const hm_event *ev = find_event(f, HM_EV_UNKNOWN_MESSAGE);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_UNKNOWN_MESSAGE);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.unknown_message.message_id, 0x77);
-            HM_ASSERT_EQ(ev->u.unknown_message.first_bytes[0], 0x77);
+            WR_ASSERT_EQ(ev->u.unknown_message.message_id, 0x77);
+            WR_ASSERT_EQ(ev->u.unknown_message.first_bytes[0], 0x77);
         }
     }
-    HM_ASSERT_EQ(count_events(f, HM_EV_LINK_DOWN), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_LINK_DOWN), 0u);
     fake_close(f);
 }
 
-HM_TEST(a_coalescing_transport_is_loud_rather_than_absorbed)
+WR_TEST(a_coalescing_transport_is_loud_rather_than_absorbed)
 {
     uint8_t  buf[1 + 46 + 10];
     uint16_t idx[1];
@@ -1502,7 +1502,7 @@ HM_TEST(a_coalescing_transport_is_loud_rather_than_absorbed)
 
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
 
     idx[0] = 500u;
@@ -1517,11 +1517,11 @@ HM_TEST(a_coalescing_transport_is_loud_rather_than_absorbed)
      * would corrupt silently.
      */
     feed(f, buf, n + 10u);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_TRAILING_BYTES), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_TRAILING_BYTES), 1u);
     fake_close(f);
 }
 
-HM_TEST(the_button_is_reported_as_an_edge_hint)
+WR_TEST(the_button_is_reported_as_an_edge_hint)
 {
     const uint8_t press[] = { 0xfb, 0x01 };
 
@@ -1532,11 +1532,11 @@ HM_TEST(the_button_is_reported_as_an_edge_hint)
 
     /* §9.4: one confirmed press produced NO notification and another produced
      * two 187 ms apart.  The library reports edges and builds no counter. */
-    HM_ASSERT_EQ(count_events(f, HM_EV_BUTTON), 2u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_BUTTON), 2u);
     fake_close(f);
 }
 
-HM_TEST(a_device_error_carries_no_meaning_beyond_its_arrival)
+WR_TEST(a_device_error_carries_no_meaning_beyond_its_arrival)
 {
     const uint8_t err[] = { 0xd0, 0x03 };
 
@@ -1544,19 +1544,19 @@ HM_TEST(a_device_error_carries_no_meaning_beyond_its_arrival)
     bring_up(f);
     feed(f, err, sizeof(err));
     {
-        const hm_event *ev = find_event(f, HM_EV_DEVICE_ERROR);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_DEVICE_ERROR);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
             /* ⚠ Seven distinct causes all returned d0 03 (§7.2), so the code
              * classifies nothing.  Unsolicited here: no request is in flight. */
-            HM_ASSERT_EQ(ev->u.device_error.code, 0x03);
-            HM_ASSERT_EQ(ev->u.device_error.request_id, 0u);
+            WR_ASSERT_EQ(ev->u.device_error.code, 0x03);
+            WR_ASSERT_EQ(ev->u.device_error.request_id, 0u);
         }
     }
     fake_close(f);
 }
 
-HM_TEST(a_regressing_host_clock_is_clamped_and_reported)
+WR_TEST(a_regressing_host_clock_is_clamped_and_reported)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
@@ -1566,17 +1566,17 @@ HM_TEST(a_regressing_host_clock_is_clamped_and_reported)
      * clamps and continues — and says so, because it is entirely on the
      * consumer's side of the boundary and they cannot fix what they cannot
      * see. */
-    hm_session_on_bytes(f->s, k_status, sizeof(k_status), f->now - (hm_time_us)5 * 1000 * 1000);
+    wr_session_on_bytes(f->s, k_status, sizeof(k_status), f->now - (wr_time_us)5 * 1000 * 1000);
     drain(f);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_HOST_CLOCK_REGRESSION), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_HOST_CLOCK_REGRESSION), 1u);
     fake_close(f);
 }
 
-HM_TEST(pinned_samples_are_reported_with_the_span_they_cover)
+WR_TEST(pinned_samples_are_reported_with_the_span_they_cover)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
 
     for (uint32_t i = 0; i < 5u; ++i) {
@@ -1585,26 +1585,26 @@ HM_TEST(pinned_samples_are_reported_with_the_span_they_cover)
          * like a plausible waveform (§6.4) and nothing on the wire reports it. */
         feed_frame(f, (uint16_t)(200u + i), ticks_for(200u + i), 32767);
     }
-    HM_ASSERT((f->live[f->nlive - 1u].flags & (uint16_t)HM_SAMPLE_PINNED) != 0u);
+    WR_ASSERT((f->live[f->nlive - 1u].flags & (uint16_t)WR_SAMPLE_PINNED) != 0u);
 
-    run_to(f, f->now + (hm_time_us)2 * 1000 * 1000);
+    run_to(f, f->now + (wr_time_us)2 * 1000 * 1000);
     {
-        const hm_event *ev = find_event(f, HM_EV_PINNED_SAMPLES);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_PINNED_SAMPLES);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.pinned.counts.total, 10u); /* accel_x, both units */
+            WR_ASSERT_EQ(ev->u.pinned.counts.total, 10u); /* accel_x, both units */
             /* ⚠ A count without the span it covers is an estimate without
              * evidence: 10 pins in 5 samples and 10 in 10,000 are different
              * facts. */
-            HM_ASSERT(ev->u.pinned.over_samples >= 5u);
+            WR_ASSERT(ev->u.pinned.over_samples >= 5u);
         }
     }
     fake_close(f);
 }
 
-HM_TEST(set_clock_correction_rejects_an_empty_field_mask)
+WR_TEST(set_clock_correction_rejects_an_empty_field_mask)
 {
-    hm_clock_correction c;
+    wr_clock_correction c;
 
     fake *f = fake_open(NULL);
     memset(&c, 0, sizeof(c));
@@ -1612,40 +1612,40 @@ HM_TEST(set_clock_correction_rejects_an_empty_field_mask)
     /* ⚠ `= {0}` is the idiom for every other struct in this API, so the one
      * struct whose zero value would wipe a term nobody measured is the one a
      * consumer reaches for by accident.  It is rejected, not obeyed. */
-    HM_ASSERT_EQ(hm_session_set_clock_correction(f->s, &c), HM_ERR_INVALID_ARG);
+    WR_ASSERT_EQ(wr_session_set_clock_correction(f->s, &c), WR_ERR_INVALID_ARG);
 
-    c.fields = (uint32_t)(HM_CORRECTION_RATE | HM_CORRECTION_DRIFT);
+    c.fields = (uint32_t)(WR_CORRECTION_RATE | WR_CORRECTION_DRIFT);
     c.rate_ppm = -350.0;
     c.residual_drift_us_per_s = 400.0;
     memcpy(c.provenance, "bay 3 camera+mic", 17u);
-    HM_ASSERT_EQ(hm_session_set_clock_correction(f->s, &c), HM_OK);
+    WR_ASSERT_EQ(wr_session_set_clock_correction(f->s, &c), WR_OK);
 
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 1u, ticks_for(1u), 0);
     {
-        hm_clock_snapshot snap;
-        (void)hm_session_clock(f->s, &snap);
+        wr_clock_snapshot snap;
+        (void)wr_session_clock(f->s, &snap);
         /* Everything set is carried in every subsequent snapshot, so a
          * re-analysis a year later reproduces the same alignment. */
-        HM_ASSERT((snap.flags & (uint32_t)HM_CLOCK_EXTERNAL_CORRECTION) != 0u);
-        HM_ASSERT_NEAR(snap.external_ppm, -350.0, 1e-9);
-        HM_ASSERT_NEAR(snap.accuracy_drift_us_per_s, 400.0, 1e-9);
-        HM_ASSERT_STR(snap.provenance, "bay 3 camera+mic");
+        WR_ASSERT((snap.flags & (uint32_t)WR_CLOCK_EXTERNAL_CORRECTION) != 0u);
+        WR_ASSERT_NEAR(snap.external_ppm, -350.0, 1e-9);
+        WR_ASSERT_NEAR(snap.accuracy_drift_us_per_s, 400.0, 1e-9);
+        WR_ASSERT_STR(snap.provenance, "bay 3 camera+mic");
     }
     fake_close(f);
 }
 
-HM_TEST(close_seals_every_drain)
+WR_TEST(close_seals_every_drain)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     f->drain_writes = false;
     feed_frame(f, 5u, ticks_for(5u), 0);
 
-    hm_session_close(f->s);
+    wr_session_close(f->s);
 
     /*
      * ⚠ The stop barrier (api-request §2.11).  After close() returns, nothing
@@ -1653,28 +1653,28 @@ HM_TEST(close_seals_every_drain)
      * is precisely why destroying one is safe from this instant.
      */
     {
-        hm_write_request w[4];
-        hm_event         ev[4];
-        hm_sample        sm[4];
-        hm_wire_chunk    wc[4];
-        HM_ASSERT_EQ(hm_session_poll_writes(f->s, w, 4u), 0u);
-        HM_ASSERT_EQ(hm_session_poll_events(f->s, ev, 4u), 0u);
-        HM_ASSERT_EQ(hm_session_poll_live(f->s, sm, 4u), 0u);
-        HM_ASSERT_EQ(hm_session_poll_wire(f->s, wc, 4u), 0u);
+        wr_write_request w[4];
+        wr_event         ev[4];
+        wr_sample        sm[4];
+        wr_wire_chunk    wc[4];
+        WR_ASSERT_EQ(wr_session_poll_writes(f->s, w, 4u), 0u);
+        WR_ASSERT_EQ(wr_session_poll_events(f->s, ev, 4u), 0u);
+        WR_ASSERT_EQ(wr_session_poll_live(f->s, sm, 4u), 0u);
+        WR_ASSERT_EQ(wr_session_poll_wire(f->s, wc, 4u), 0u);
     }
-    HM_ASSERT(hm_session_next_due_us(f->s) == HM_TIME_NEVER);
+    WR_ASSERT(wr_session_next_due_us(f->s) == WR_TIME_NEVER);
     /* And nothing can be started again. */
-    HM_ASSERT(hm_session_start_stream(f->s) < HM_OK);
-    hm_session_tick(f->s, f->now + 1000000);
+    WR_ASSERT(wr_session_start_stream(f->s) < WR_OK);
+    wr_session_tick(f->s, f->now + 1000000);
     fake_close(f);
 }
 
 /* ------------------------------------------------------------------------ */
 /* The availability queries, before anything has measured them (§8.5)         */
 /* ------------------------------------------------------------------------ */
-HM_TEST(the_availability_queries_separate_a_measurement_from_the_seed)
+WR_TEST(the_availability_queries_separate_a_measurement_from_the_seed)
 {
-    hm_time_range range;
+    wr_time_range range;
 
     fake *f = fake_open(NULL);
 
@@ -1682,23 +1682,23 @@ HM_TEST(the_availability_queries_separate_a_measurement_from_the_seed)
      * buffers while streaming, so before one there is nothing resident to
      * report and saying "0 µs wide" would be a measurement of a buffer that
      * does not exist. */
-    HM_ASSERT_EQ(hm_history_resident_range(f->s, &range), HM_ERR_NO_STREAM);
-    HM_ASSERT(!hm_history_coverage_available(f->s, 0, 1000));
+    WR_ASSERT_EQ(wr_history_resident_range(f->s, &range), WR_ERR_NO_STREAM);
+    WR_ASSERT(!wr_history_coverage_available(f->s, 0, 1000));
 
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     for (uint32_t i = 0; i < 40u; ++i) {
         f->now += 40000; /* ≈25 Hz live, so the stream has a real age */
-        hm_session_tick(f->s, f->now);
+        wr_session_tick(f->s, f->now);
         feed_frame(f, (uint16_t)(7u + i * 32u), ticks_for(7u + i * 32u), 0);
     }
 
     /* ⚠ Before any routine has run, every sample says UNCALIBRATED — never
      * CALIBRATED, and never a hopeful UNKNOWN.  We have looked: none has been
      * performed (§8.3). */
-    HM_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)HM_CAL_UNCALIBRATED);
-    HM_ASSERT(isnan(hm_calibration_presence_angle_deg(f->s)));
+    WR_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)WR_CAL_UNCALIBRATED);
+    WR_ASSERT(isnan(wr_calibration_presence_angle_deg(f->s)));
 
     /*
      * ⚠⚠ THE STATUS IS THE WHOLE POINT OF THIS TEST.  §7.3's ~7.5 s was measured ONCE
@@ -1706,35 +1706,35 @@ HM_TEST(the_availability_queries_separate_a_measurement_from_the_seed)
      * whether the buffer holds a fixed sample count or a fixed duration is not
      * established, which the motion-adaptive rate turns into an 8× difference.
      * So the range is filled from the seed, because an order of magnitude is
-     * useful, and the status says HM_PENDING, because nothing on THIS connection
-     * has measured it.  A stub that returned HM_OK here would be the seed
+     * useful, and the status says WR_PENDING, because nothing on THIS connection
+     * has measured it.  A stub that returned WR_OK here would be the seed
      * wearing a measurement's clothes, which is increment 7's whole failure
      * mode.
      */
-    HM_ASSERT_EQ(hm_history_resident_range(f->s, &range), HM_PENDING);
-    HM_ASSERT(range.end_us > range.start_us);
+    WR_ASSERT_EQ(wr_history_resident_range(f->s, &range), WR_PENDING);
+    WR_ASSERT(range.end_us > range.start_us);
     /* Clamped to the stream's own start (AR B10): this stream is milliseconds
      * old, so it cannot claim to reach back 7.5 s. */
-    HM_ASSERT(range.end_us - range.start_us < HM_HISTORY_DEPTH_SEED_US);
+    WR_ASSERT(range.end_us - range.start_us < WR_HISTORY_DEPTH_SEED_US);
 
     /* ⚠ And the bool answers only from the MEASURED case, because it has
      * nowhere to put the caveat.  False is "we cannot say" — the only answer
      * that cannot mislead a consumer into skipping a check. */
-    HM_ASSERT(!hm_history_coverage_available(f->s, range.start_us, range.end_us));
+    WR_ASSERT(!wr_history_coverage_available(f->s, range.start_us, range.end_us));
 
     /* An id nobody issued is a programming error at the call site, not a wait
      * that never ends. */
     {
-        hm_history_block *block = (hm_history_block *)(uintptr_t)1;
-        HM_ASSERT_EQ(hm_history_collect(f->s, 12345u, &block), HM_ERR_INVALID_ARG);
-        HM_ASSERT(block == NULL);
-        HM_ASSERT_EQ(hm_history_cancel(f->s, 12345u), HM_ERR_INVALID_ARG);
-        HM_ASSERT_EQ(hm_history_pending(f->s), 0u);
+        wr_history_block *block = (wr_history_block *)(uintptr_t)1;
+        WR_ASSERT_EQ(wr_history_collect(f->s, 12345u, &block), WR_ERR_INVALID_ARG);
+        WR_ASSERT(block == NULL);
+        WR_ASSERT_EQ(wr_history_cancel(f->s, 12345u), WR_ERR_INVALID_ARG);
+        WR_ASSERT_EQ(wr_history_pending(f->s), 0u);
     }
     fake_close(f);
 }
 
-HM_TEST(the_live_gap_alarm_is_suppressed_inside_a_bracket_and_returns_after_it)
+WR_TEST(the_live_gap_alarm_is_suppressed_inside_a_bracket_and_returns_after_it)
 {
     const uint8_t mark_start[] = { 0xa1, 0x02 };
     const uint8_t mark_end[] = { 0xa1, 0x01 };
@@ -1742,22 +1742,22 @@ HM_TEST(the_live_gap_alarm_is_suppressed_inside_a_bracket_and_returns_after_it)
 
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 300u, ticks_for(300u), 0);
 
     /* Streaming and then nothing: BLE at range delays notifications and nothing
      * in the protocol reports it, so the silence has to be reported here. */
-    run_to(f, f->now + (hm_time_us)4 * 1000 * 1000);
-    HM_ASSERT(count_warnings(f, HM_WARN_LIVE_GAP) >= 1u);
-    gaps_after_stream = count_warnings(f, HM_WARN_LIVE_GAP);
+    run_to(f, f->now + (wr_time_us)4 * 1000 * 1000);
+    WR_ASSERT(count_warnings(f, WR_WARN_LIVE_GAP) >= 1u);
+    gaps_after_stream = count_warnings(f, WR_WARN_LIVE_GAP);
 
     /* ⚠ Inside a retrieval, live delivery is suspended BY DESIGN for up to the
      * width of the pull (§10.1).  Warning there would cry wolf on every
      * gather, so the alarm is suppressed rather than merely late. */
     feed(f, mark_start, sizeof(mark_start));
-    run_to(f, f->now + (hm_time_us)10 * 1000 * 1000);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_LIVE_GAP), gaps_after_stream);
+    run_to(f, f->now + (wr_time_us)10 * 1000 * 1000);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_LIVE_GAP), gaps_after_stream);
 
     /*
      * ⚠ And it comes BACK when the bracket closes, without waiting for a frame
@@ -1766,12 +1766,12 @@ HM_TEST(the_live_gap_alarm_is_suppressed_inside_a_bracket_and_returns_after_it)
      * good, and that silence is indistinguishable from a healthy stream.
      */
     feed(f, mark_end, sizeof(mark_end));
-    run_to(f, f->now + (hm_time_us)4 * 1000 * 1000);
-    HM_ASSERT(count_warnings(f, HM_WARN_LIVE_GAP) > gaps_after_stream);
+    run_to(f, f->now + (wr_time_us)4 * 1000 * 1000);
+    WR_ASSERT(count_warnings(f, WR_WARN_LIVE_GAP) > gaps_after_stream);
     fake_close(f);
 }
 
-HM_TEST(a_truncated_notification_is_short_rather_than_silent)
+WR_TEST(a_truncated_notification_is_short_rather_than_silent)
 {
     const uint8_t stub[] = { 0x90, 0x00 };
     const uint8_t started[] = { 0x82, 0x01 };
@@ -1780,15 +1780,15 @@ HM_TEST(a_truncated_notification_is_short_rather_than_silent)
 
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
 
     /* Not a whole record.  §3 gives no length field, no sequence number and no
      * checksum, so there is nothing to resynchronise on — the notification is
      * dropped, loudly. */
     feed(f, stub, sizeof(stub));
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_SHORT_FRAME), 1u);
-    HM_ASSERT_EQ(f->nlive, 0u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_SHORT_FRAME), 1u);
+    WR_ASSERT_EQ(f->nlive, 0u);
 
     /* Messages in §5.1's table that a client has nothing to do with are
      * accepted and ignored — never errors, never link-down. */
@@ -1798,8 +1798,8 @@ HM_TEST(a_truncated_notification_is_short_rather_than_silent)
     /* An ack with no marker outstanding is a duplicate or the tail of a routine
      * that already ended: it moves no phase and is not evented. */
     feed(f, cal_ack, sizeof(cal_ack));
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_IDLE);
-    HM_ASSERT_EQ(count_events(f, HM_EV_CALIBRATION_PHASE), 0u);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_IDLE);
+    WR_ASSERT_EQ(count_events(f, WR_EV_CALIBRATION_PHASE), 0u);
 
     /*
      * ⚠ A `0x94` NOBODY ASKED FOR STILL MOVES THE FLAG.  It is not a verdict —
@@ -1810,17 +1810,17 @@ HM_TEST(a_truncated_notification_is_short_rather_than_silent)
      * UNKNOWN and the arrival is reported.
      */
     feed(f, cal_result, sizeof(cal_result));
-    HM_ASSERT_EQ(count_events(f, HM_EV_LINK_DOWN), 0u);
-    HM_ASSERT_EQ(count_events(f, HM_EV_UNKNOWN_MESSAGE), 0u);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNKNOWN);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_CALIBRATION_UNSOLICITED), 1u);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_IDLE);
+    WR_ASSERT_EQ(count_events(f, WR_EV_LINK_DOWN), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_UNKNOWN_MESSAGE), 0u);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNKNOWN);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_CALIBRATION_UNSOLICITED), 1u);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_IDLE);
     fake_close(f);
 }
 
-HM_TEST(a_legacy_stream_is_decoded_and_marked_not_time_alignable)
+WR_TEST(a_legacy_stream_is_decoded_and_marked_not_time_alignable)
 {
-    hm_session_config cfg = hm_session_config_default();
+    wr_session_config cfg = wr_session_config_default();
     uint8_t           frame[1 + 42];
     const uint8_t     started[] = { 0x82, 0x01 };
 
@@ -1832,15 +1832,15 @@ HM_TEST(a_legacy_stream_is_decoded_and_marked_not_time_alignable)
      * and marks every sample so a consumer cannot feed it into a path that
      * assumes otherwise.
      */
-    cfg.stream_config = hm_stream_config_legacy();
+    cfg.stream_config = wr_stream_config_legacy();
     {
         fake *f = fake_open(&cfg);
         bring_up(f);
-        HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+        WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
         drain(f);
-        HM_ASSERT_EQ(f->written[f->nwritten - 1u][0], 0x82);
-        HM_ASSERT_EQ(f->written_len[f->nwritten - 1u], 1u); /* no config byte */
-        HM_ASSERT_EQ(count_warnings(f, HM_WARN_LEGACY_STREAM), 1u);
+        WR_ASSERT_EQ(f->written[f->nwritten - 1u][0], 0x82);
+        WR_ASSERT_EQ(f->written_len[f->nwritten - 1u], 1u); /* no config byte */
+        WR_ASSERT_EQ(count_warnings(f, WR_WARN_LEGACY_STREAM), 1u);
 
         memset(frame, 0, sizeof(frame));
         frame[0] = 0x7f;
@@ -1849,18 +1849,18 @@ HM_TEST(a_legacy_stream_is_decoded_and_marked_not_time_alignable)
         feed(f, started, sizeof(started));
         feed(f, frame, sizeof(frame));
 
-        HM_ASSERT_EQ(f->nlive, 1u);
+        WR_ASSERT_EQ(f->nlive, 1u);
         if (f->nlive == 1u) {
-            const hm_sample *sm = &f->live[0];
-            HM_ASSERT((sm->flags & (uint16_t)HM_SAMPLE_INDEX_MISSING) != 0u);
-            HM_ASSERT((sm->flags & (uint16_t)HM_SAMPLE_NOT_TIME_ALIGNABLE) != 0u);
-            HM_ASSERT((sm->flags & (uint16_t)HM_SAMPLE_TICKS_MISSING) != 0u);
+            const wr_sample *sm = &f->live[0];
+            WR_ASSERT((sm->flags & (uint16_t)WR_SAMPLE_INDEX_MISSING) != 0u);
+            WR_ASSERT((sm->flags & (uint16_t)WR_SAMPLE_NOT_TIME_ALIGNABLE) != 0u);
+            WR_ASSERT((sm->flags & (uint16_t)WR_SAMPLE_TICKS_MISSING) != 0u);
             /* No index means nothing the fit could anchor on, so there is no
              * host time — and it says so rather than inventing one. */
-            HM_ASSERT((sm->flags & (uint16_t)HM_SAMPLE_NO_FIT) != 0u);
-            HM_ASSERT(sm->host_time_us == HM_TIME_UNKNOWN);
-            HM_ASSERT_EQ(sm->uncertainty_us, UINT32_MAX);
-            HM_ASSERT(sm->lower_arm.device_time_us == HM_TIME_UNKNOWN);
+            WR_ASSERT((sm->flags & (uint16_t)WR_SAMPLE_NO_FIT) != 0u);
+            WR_ASSERT(sm->host_time_us == WR_TIME_UNKNOWN);
+            WR_ASSERT_EQ(sm->uncertainty_us, UINT32_MAX);
+            WR_ASSERT(sm->lower_arm.device_time_us == WR_TIME_UNKNOWN);
         }
         fake_close(f);
     }
@@ -1869,139 +1869,139 @@ HM_TEST(a_legacy_stream_is_decoded_and_marked_not_time_alignable)
 /* ------------------------------------------------------------------------ */
 /* Increment 4 — calibration (design §7, spec §8)                            */
 /* ------------------------------------------------------------------------ */
-HM_TEST(the_routine_walks_both_markers_and_a_skipped_check_never_says_calibrated)
+WR_TEST(the_routine_walks_both_markers_and_a_skipped_check_never_says_calibrated)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
 
     /* Nothing is written until the user is in pose 0: begin() is a UI state, not
      * a device transaction. */
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_AWAIT_HORIZONTAL);
-    HM_ASSERT_EQ(count_writes(f, 0xa2, 0u), 0u);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_AWAIT_HORIZONTAL);
+    WR_ASSERT_EQ(count_writes(f, 0xa2, 0u), 0u);
 
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_MARKING_POSE0);
-    HM_ASSERT_EQ(count_writes(f, 0xa2, 0u), 1u);
-    HM_ASSERT_EQ(f->written_len[f->nwritten - 1u], 2u);
-    HM_ASSERT_EQ(f->written[f->nwritten - 1u][1], 0x00); /* `a2 00` */
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_MARKING_POSE0);
+    WR_ASSERT_EQ(count_writes(f, 0xa2, 0u), 1u);
+    WR_ASSERT_EQ(f->written_len[f->nwritten - 1u], 2u);
+    WR_ASSERT_EQ(f->written[f->nwritten - 1u][1], 0x00); /* `a2 00` */
 
     /* ⚠ The device answers both markers with the same `a2 01`; which marker it
      * acknowledges is our own state and nothing on the wire (§8.2). */
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_OBSERVING_RAISE);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_OBSERVING_RAISE);
 
-    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_MARKING_POSE1);
-    HM_ASSERT_EQ(count_writes(f, 0xa2, 0u), 2u);
-    HM_ASSERT_EQ(f->written[f->nwritten - 1u][1], 0x01); /* `a2 01` */
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_MARKING_POSE1);
+    WR_ASSERT_EQ(count_writes(f, 0xa2, 0u), 2u);
+    WR_ASSERT_EQ(f->written[f->nwritten - 1u][1], 0x01); /* `a2 01` */
 
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_APPLYING);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_APPLYING);
 
     feed_cal_result(f);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_VERIFYING);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_VERIFYING);
     /* Six transitions, every one of them evented, so a UI renders progress from
      * the queue rather than polling. */
-    HM_ASSERT_EQ(count_events(f, HM_EV_CALIBRATION_PHASE), 6u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_CALIBRATION_PHASE), 6u);
 
     /*
      * ⚠ THE ONE THIS INCREMENT EXISTS FOR.  The presence check is skipped, so
-     * every later sample reads HM_CAL_UNKNOWN — never CALIBRATED.  The device
+     * every later sample reads WR_CAL_UNKNOWN — never CALIBRATED.  The device
      * applies the transform for every `a2 01` including attempts an application
      * would reject, so "we issued the markers" is not evidence that calibration
      * took, and the recording has to say we did not check rather than imply we
      * did (§7.5, design review 12.6).
      */
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNKNOWN);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNKNOWN);
     {
         size_t before = f->nlive;
         f->now += 40000;
         feed_frame(f, 400u, ticks_for(400u), 0);
-        HM_ASSERT(f->nlive > before);
-        HM_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)HM_CAL_UNKNOWN);
+        WR_ASSERT(f->nlive > before);
+        WR_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)WR_CAL_UNKNOWN);
     }
     /* And no measurement means no angle and no anchor — not a zero and not an
      * empty struct that reads like one. */
-    HM_ASSERT(isnan(hm_calibration_presence_angle_deg(f->s)));
+    WR_ASSERT(isnan(wr_calibration_presence_angle_deg(f->s)));
     {
-        hm_calibration_presence_event anchor;
-        HM_ASSERT_EQ(hm_calibration_reference_anchor(f->s, &anchor), HM_ERR_INVALID_STATE);
+        wr_calibration_presence_event anchor;
+        WR_ASSERT_EQ(wr_calibration_reference_anchor(f->s, &anchor), WR_ERR_INVALID_STATE);
     }
     fake_close(f);
 }
 
-HM_TEST(a_presence_check_at_the_applied_population_confirms_and_keeps_its_anchor)
+WR_TEST(a_presence_check_at_the_applied_population_confirms_and_keeps_its_anchor)
 {
     /* §8.2's applied population: 0.36-0.79° at the reference pose, against a
      * 6° threshold with an order of magnitude of margin. */
-    fake *f = cal_measure_at(0.5, HM_PRESENCE_MAX_SAMPLES);
+    fake *f = cal_measure_at(0.5, WR_PRESENCE_MAX_SAMPLES);
 
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_COMPLETE);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_CALIBRATED);
-    HM_ASSERT_EQ(count_events(f, HM_EV_CALIBRATION_PRESENCE), 1u);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_COMPLETE);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_CALIBRATED);
+    WR_ASSERT_EQ(count_events(f, WR_EV_CALIBRATION_PRESENCE), 1u);
 
     {
-        const hm_event *ev = find_event(f, HM_EV_CALIBRATION_PRESENCE);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_CALIBRATION_PRESENCE);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            const hm_calibration_presence_event *p = &ev->u.calibration_presence;
-            HM_ASSERT_EQ(p->samples_used, HM_PRESENCE_MAX_SAMPLES);
-            HM_ASSERT_EQ(p->state, (uint8_t)HM_CAL_CALIBRATED);
-            HM_ASSERT(p->relative_angle_deg < HM_PRESENCE_CALIBRATED_MAX_DEG);
+            const wr_calibration_presence_event *p = &ev->u.calibration_presence;
+            WR_ASSERT_EQ(p->samples_used, WR_PRESENCE_MAX_SAMPLES);
+            WR_ASSERT_EQ(p->state, (uint8_t)WR_CAL_CALIBRATED);
+            WR_ASSERT(p->relative_angle_deg < WR_PRESENCE_CALIBRATED_MAX_DEG);
             /* ⚠ The medoid is a REAL RECORD: its index is one of the run's and
              * its skew is a measurement, not an average (§10.3's 59 ticks). */
-            HM_ASSERT(p->sample_index >= 200u && p->sample_index < 200u + HM_PRESENCE_MAX_SAMPLES);
-            HM_ASSERT(p->skew_us > 0);
+            WR_ASSERT(p->sample_index >= 200u && p->sample_index < 200u + WR_PRESENCE_MAX_SAMPLES);
+            WR_ASSERT(p->skew_us > 0);
             /* ⚠ A mean without a spread is an estimate without evidence.  The
              * lower arm never moved in this fixture and the palm did, so the
              * two entries must not read the same. */
-            HM_ASSERT(p->pose_spread_deg[HM_UNIT_PALM] > 0.0f);
-            HM_ASSERT_NEAR(p->pose_spread_deg[HM_UNIT_LOWER_ARM], 0.0f, 1e-3f);
+            WR_ASSERT(p->pose_spread_deg[WR_UNIT_PALM] > 0.0f);
+            WR_ASSERT_NEAR(p->pose_spread_deg[WR_UNIT_LOWER_ARM], 0.0f, 1e-3f);
         }
     }
 
     /* Queryable as well as evented: the event ring is drop-oldest and the pose
      * has passed, so this measurement cannot be re-derived (R14). */
     {
-        hm_calibration_presence_event anchor;
-        HM_ASSERT_EQ(hm_calibration_reference_anchor(f->s, &anchor), HM_OK);
-        HM_ASSERT_NEAR(anchor.relative_angle_deg, hm_calibration_presence_angle_deg(f->s), 1e-6f);
+        wr_calibration_presence_event anchor;
+        WR_ASSERT_EQ(wr_calibration_reference_anchor(f->s, &anchor), WR_OK);
+        WR_ASSERT_NEAR(anchor.relative_angle_deg, wr_calibration_presence_angle_deg(f->s), 1e-6f);
     }
 
     /* Only now does a sample claim CALIBRATED. */
     f->now += 40000;
     feed_frame(f, 500u, ticks_for(500u), 0);
-    HM_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)HM_CAL_CALIBRATED);
+    WR_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)WR_CAL_CALIBRATED);
     fake_close(f);
 }
 
-HM_TEST(a_pose_in_the_uncalibrated_population_is_reported_rather_than_assumed)
+WR_TEST(a_pose_in_the_uncalibrated_population_is_reported_rather_than_assumed)
 {
     /* §8.2: 15.01° after a power cycle with the strap untouched, 18.80° after a
      * plain disconnect — an order of magnitude from anything applied. */
-    fake *f = cal_measure_at(15.0, HM_PRESENCE_MAX_SAMPLES);
+    fake *f = cal_measure_at(15.0, WR_PRESENCE_MAX_SAMPLES);
 
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_COMPLETE);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNCALIBRATED);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_CALIBRATION_ABSENT), 1u);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_COMPLETE);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNCALIBRATED);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_CALIBRATION_ABSENT), 1u);
     /* ⚠ The anchor is kept: a measurement that says "absent" is still a
      * measurement, and it is the one that says why. */
     {
-        hm_calibration_presence_event anchor;
-        HM_ASSERT_EQ(hm_calibration_reference_anchor(f->s, &anchor), HM_OK);
-        HM_ASSERT(anchor.relative_angle_deg > HM_PRESENCE_ABSENT_MIN_DEG);
+        wr_calibration_presence_event anchor;
+        WR_ASSERT_EQ(wr_calibration_reference_anchor(f->s, &anchor), WR_OK);
+        WR_ASSERT(anchor.relative_angle_deg > WR_PRESENCE_ABSENT_MIN_DEG);
     }
     fake_close(f);
 }
 
-HM_TEST(the_indeterminate_band_leaves_the_state_exactly_as_it_was)
+WR_TEST(the_indeterminate_band_leaves_the_state_exactly_as_it_was)
 {
     /*
      * ⚠ Between the two populations §8.2 measured, so it is evidence of
@@ -2010,37 +2010,37 @@ HM_TEST(the_indeterminate_band_leaves_the_state_exactly_as_it_was)
      * calibration with no raise at all, carrying no axis information
      * whatsoever, scored 0.70° against 1.96° for the correct routine.
      */
-    fake *f = cal_measure_at(8.0, HM_PRESENCE_MAX_SAMPLES);
+    fake *f = cal_measure_at(8.0, WR_PRESENCE_MAX_SAMPLES);
 
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_COMPLETE);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNKNOWN);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_CALIBRATION_INDETERMINATE), 1u);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_CALIBRATION_ABSENT), 0u);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_COMPLETE);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNKNOWN);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_CALIBRATION_INDETERMINATE), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_CALIBRATION_ABSENT), 0u);
     fake_close(f);
 }
 
-HM_TEST(the_presence_window_measures_what_arrived_rather_than_waiting_for_a_full_run)
+WR_TEST(the_presence_window_measures_what_arrived_rather_than_waiting_for_a_full_run)
 {
     /* A held pose is a resting wrist and §6.6 puts the live rate there around
      * 25 Hz, so the buffer would take 2.6 s to fill.  The window closes first
      * and the run is measured on what it has. */
     fake *f = cal_measure_at(0.5, 20u);
 
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_VERIFYING); /* still open */
-    run_to(f, f->now + (hm_time_us)3 * 1000 * 1000);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_COMPLETE);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_CALIBRATED);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_VERIFYING); /* still open */
+    run_to(f, f->now + (wr_time_us)3 * 1000 * 1000);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_COMPLETE);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_CALIBRATED);
     {
-        const hm_event *ev = find_event(f, HM_EV_CALIBRATION_PRESENCE);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_CALIBRATION_PRESENCE);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.calibration_presence.samples_used, 20u);
+            WR_ASSERT_EQ(ev->u.calibration_presence.samples_used, 20u);
         }
     }
     fake_close(f);
 }
 
-HM_TEST(a_presence_run_that_starves_says_it_could_not_measure)
+WR_TEST(a_presence_run_that_starves_says_it_could_not_measure)
 {
     /*
      * ⚠ "No evidence" is not "agreement".  The check was ASKED FOR and could
@@ -2050,29 +2050,29 @@ HM_TEST(a_presence_run_that_starves_says_it_could_not_measure)
      */
     fake *f = cal_measure_at(0.5, 3u);
 
-    run_to(f, f->now + (hm_time_us)3 * 1000 * 1000);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_COMPLETE);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNKNOWN);
-    HM_ASSERT_EQ(count_events(f, HM_EV_CALIBRATION_PRESENCE), 0u);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_PRESENCE_NOT_MEASURED), 1u);
+    run_to(f, f->now + (wr_time_us)3 * 1000 * 1000);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_COMPLETE);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNKNOWN);
+    WR_ASSERT_EQ(count_events(f, WR_EV_CALIBRATION_PRESENCE), 0u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_PRESENCE_NOT_MEASURED), 1u);
     {
-        const hm_event *ev = NULL;
+        const wr_event *ev = NULL;
         for (size_t i = 0; i < f->nevents; ++i) {
-            if (f->events[i].type == (uint16_t)HM_EV_WARNING &&
-                f->events[i].u.warning.code == (uint16_t)HM_WARN_PRESENCE_NOT_MEASURED) {
+            if (f->events[i].type == (uint16_t)WR_EV_WARNING &&
+                f->events[i].u.warning.code == (uint16_t)WR_WARN_PRESENCE_NOT_MEASURED) {
                 ev = &f->events[i];
             }
         }
-        HM_ASSERT(ev != NULL);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.warning.detail_i32, 3); /* how many arrived */
+            WR_ASSERT_EQ(ev->u.warning.detail_i32, 3); /* how many arrived */
         }
     }
-    HM_ASSERT(isnan(hm_calibration_presence_angle_deg(f->s)));
+    WR_ASSERT(isnan(wr_calibration_presence_angle_deg(f->s)));
     fake_close(f);
 }
 
-HM_TEST(calibration_refuses_without_a_stream_and_while_a_bracket_is_open)
+WR_TEST(calibration_refuses_without_a_stream_and_while_a_bracket_is_open)
 {
     const uint8_t mark_start[] = { 0xa1, 0x02 };
     size_t        writes_before;
@@ -2083,12 +2083,12 @@ HM_TEST(calibration_refuses_without_a_stream_and_while_a_bracket_is_open)
     /* ⚠ §8.2: the device observes a CONTINUOUS RAISE between the markers, which
      * cannot be done from two static samples.  It refuses rather than waiting —
      * there is deliberately no AWAIT_STREAM phase to wait in. */
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_ERR_NO_STREAM);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_ERR_NO_STREAM);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_ERR_NO_STREAM); /* STARTING is not RUNNING */
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_ERR_NO_STREAM); /* STARTING is not RUNNING */
     feed_frame(f, 100u, ticks_for(100u), 0);
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
     drain(f);
 
     /*
@@ -2100,35 +2100,35 @@ HM_TEST(calibration_refuses_without_a_stream_and_while_a_bracket_is_open)
      */
     writes_before = f->nwritten;
     feed(f, mark_start, sizeof(mark_start));
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_ERR_BUSY);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_ERR_BUSY);
-    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_ERR_BUSY);
-    HM_ASSERT_EQ(hm_calibration_confirm_reference_pose(f->s), HM_ERR_BUSY);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_ERR_BUSY);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_ERR_BUSY);
+    WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_ERR_BUSY);
+    WR_ASSERT_EQ(wr_calibration_confirm_reference_pose(f->s), WR_ERR_BUSY);
     drain(f);
-    HM_ASSERT_EQ(count_writes(f, 0xa2, writes_before), 0u);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_AWAIT_HORIZONTAL);
+    WR_ASSERT_EQ(count_writes(f, 0xa2, writes_before), 0u);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_AWAIT_HORIZONTAL);
 
     /* ⚠ ONE EXEMPTION: abort writes nothing, so the quiet period does not apply
      * and a UI can always cancel a routine it has given up on. */
-    HM_ASSERT_EQ(hm_calibration_abort(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_abort(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_ABORTED);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_ABORTED);
     {
-        const hm_event *ev = last_phase_event(f);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = last_phase_event(f);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.calibration_phase.abort_reason, (uint8_t)HM_CAL_ABORT_CALLER);
+            WR_ASSERT_EQ(ev->u.calibration_phase.abort_reason, (uint8_t)WR_CAL_ABORT_CALLER);
         }
     }
     /* Nothing to abort twice. */
-    HM_ASSERT_EQ(hm_calibration_abort(f->s), HM_ERR_INVALID_STATE);
+    WR_ASSERT_EQ(wr_calibration_abort(f->s), WR_ERR_INVALID_STATE);
     fake_close(f);
 }
 
-HM_TEST(the_calibration_result_reaches_the_wire_log_verbatim_and_the_decoder_never)
+WR_TEST(the_calibration_result_reaches_the_wire_log_verbatim_and_the_decoder_never)
 {
-    static hm_wire_chunk chunks[128];
-    hm_session_config    cfg = hm_session_config_default();
+    static wr_wire_chunk chunks[128];
+    wr_session_config    cfg = wr_session_config_default();
     size_t               results = 0;
 
     cfg.memory.wire_ring = chunks;
@@ -2137,14 +2137,14 @@ HM_TEST(the_calibration_result_reaches_the_wire_log_verbatim_and_the_decoder_nev
     {
         fake *f = fake_open(&cfg);
         bring_up(f);
-        HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+        WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
         drain(f);
         feed_frame(f, 100u, ticks_for(100u), 0);
-        HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-        HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+        WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+        WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
         drain(f);
         feed(f, k_cal_ack, sizeof(k_cal_ack));
-        HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_OK);
+        WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_OK);
         drain(f);
         feed(f, k_cal_ack, sizeof(k_cal_ack));
         feed_cal_result(f);
@@ -2158,41 +2158,41 @@ HM_TEST(the_calibration_result_reaches_the_wire_log_verbatim_and_the_decoder_nev
          * a sample-level one has already thrown the bytes away.
          */
         for (size_t i = 0; i < f->nwire; ++i) {
-            if (f->wire[i].direction != (uint8_t)HM_WIRE_DEVICE_TO_HOST ||
+            if (f->wire[i].direction != (uint8_t)WR_WIRE_DEVICE_TO_HOST ||
                 f->wire[i].length == 0u || f->wire[i].data[0] != 0x94) {
                 continue;
             }
             results++;
-            HM_ASSERT_EQ(f->wire[i].length, 65u); /* id + 64 */
-            HM_ASSERT_EQ(f->wire[i].flags & (uint8_t)HM_WIRE_REDACTED, 0);
+            WR_ASSERT_EQ(f->wire[i].length, 65u); /* id + 64 */
+            WR_ASSERT_EQ(f->wire[i].flags & (uint8_t)WR_WIRE_REDACTED, 0);
             /* The first quaternion, w = 16384, intact — §8.2's q1, the palm
              * unit's rotation about z. */
-            HM_ASSERT_EQ(f->wire[i].data[1], 0x40);
-            HM_ASSERT_EQ(f->wire[i].data[2], 0x00);
+            WR_ASSERT_EQ(f->wire[i].data[1], 0x40);
+            WR_ASSERT_EQ(f->wire[i].data[2], 0x00);
         }
-        HM_ASSERT_EQ(results, 1u);
+        WR_ASSERT_EQ(results, 1u);
 
         /* And both markers went out as bytes too, so a recording replays the
          * whole transaction and not just its effect. */
         {
             size_t markers = 0;
             for (size_t i = 0; i < f->nwire; ++i) {
-                if (f->wire[i].direction == (uint8_t)HM_WIRE_HOST_TO_DEVICE &&
+                if (f->wire[i].direction == (uint8_t)WR_WIRE_HOST_TO_DEVICE &&
                     f->wire[i].length == 2u && f->wire[i].data[0] == 0xa2) {
                     markers++;
                 }
             }
-            HM_ASSERT_EQ(markers, 2u);
+            WR_ASSERT_EQ(markers, 2u);
         }
         fake_close(f);
     }
 }
 
-HM_TEST(every_calibration_call_out_of_turn_names_what_is_wrong)
+WR_TEST(every_calibration_call_out_of_turn_names_what_is_wrong)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
 
@@ -2202,129 +2202,129 @@ HM_TEST(every_calibration_call_out_of_turn_names_what_is_wrong)
      * between two markers (§8.2), so an `a2 01` with no `a2 00` behind it would
      * calibrate against whatever the arm happened to be doing.
      */
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_ERR_INVALID_STATE);
-    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_ERR_INVALID_STATE);
-    HM_ASSERT_EQ(hm_calibration_confirm_reference_pose(f->s), HM_ERR_INVALID_STATE);
-    HM_ASSERT_EQ(hm_calibration_abort(f->s), HM_ERR_INVALID_STATE); /* nothing running */
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_ERR_INVALID_STATE);
+    WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_ERR_INVALID_STATE);
+    WR_ASSERT_EQ(wr_calibration_confirm_reference_pose(f->s), WR_ERR_INVALID_STATE);
+    WR_ASSERT_EQ(wr_calibration_abort(f->s), WR_ERR_INVALID_STATE); /* nothing running */
     drain(f);
-    HM_ASSERT_EQ(count_writes(f, 0xa2, 0u), 0u);
+    WR_ASSERT_EQ(count_writes(f, 0xa2, 0u), 0u);
 
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
     /* A routine already running is not silently restarted underneath a UI that
      * has lost track of it; abort first. */
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_ERR_INVALID_STATE);
-    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_ERR_INVALID_STATE);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_ERR_INVALID_STATE);
+    WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_ERR_INVALID_STATE);
 
     /* One run at a time — a second call has the same pose to measure. */
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
     feed_cal_result(f);
-    HM_ASSERT_EQ(hm_calibration_confirm_reference_pose(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_reference_pose(f->s), HM_ERR_BUSY);
+    WR_ASSERT_EQ(wr_calibration_confirm_reference_pose(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_reference_pose(f->s), WR_ERR_BUSY);
 
     /* And with the link gone it is the LINK that is reported, not the phase the
      * link took with it. */
-    hm_session_on_link_down(f->s, HM_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
+    wr_session_on_link_down(f->s, WR_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
     drain(f);
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_ERR_LINK_DOWN);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_ERR_LINK_DOWN);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_ERR_LINK_DOWN);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_ERR_LINK_DOWN);
     fake_close(f);
 }
 
-HM_TEST(the_raise_limit_is_client_policy_and_says_so_when_it_fires)
+WR_TEST(the_raise_limit_is_client_policy_and_says_so_when_it_fires)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_OBSERVING_RAISE);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_OBSERVING_RAISE);
 
     /*
      * ⚠ CLIENT POLICY, NOT A DEVICE CONSTRAINT.  §8.2 measured the device
      * returning and applying a result 15.6 s after the first marker — it was the
      * vendor's APPLICATION that rejected it.  The default 6 s is ours.
      */
-    run_to(f, f->now + (hm_time_us)7 * 1000 * 1000);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_ABORTED);
+    run_to(f, f->now + (wr_time_us)7 * 1000 * 1000);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_ABORTED);
     {
-        const hm_event *ev = last_phase_event(f);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = last_phase_event(f);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.calibration_phase.abort_reason,
-                         (uint8_t)HM_CAL_ABORT_RAISE_TOO_SLOW);
-            HM_ASSERT_EQ(ev->u.calibration_phase.previous_phase,
-                         (uint8_t)HM_CALP_OBSERVING_RAISE);
-            HM_ASSERT(ev->u.calibration_phase.elapsed_us > 0);
+            WR_ASSERT_EQ(ev->u.calibration_phase.abort_reason,
+                         (uint8_t)WR_CAL_ABORT_RAISE_TOO_SLOW);
+            WR_ASSERT_EQ(ev->u.calibration_phase.previous_phase,
+                         (uint8_t)WR_CALP_OBSERVING_RAISE);
+            WR_ASSERT(ev->u.calibration_phase.elapsed_us > 0);
         }
     }
     /* Nothing was applied, so the flag is untouched. */
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNCALIBRATED);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNCALIBRATED);
     fake_close(f);
 }
 
-HM_TEST(a_marker_the_device_never_answers_ends_the_routine_rather_than_hanging)
+WR_TEST(a_marker_the_device_never_answers_ends_the_routine_rather_than_hanging)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
 
     /* No ack.  ⚠ The bound is not in §8.2 and a stuck UI is: without it a
      * wizard waits on a user holding their arm out with no way back. */
-    run_to(f, f->now + (hm_time_us)4 * 1000 * 1000);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_ABORTED);
+    run_to(f, f->now + (wr_time_us)4 * 1000 * 1000);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_ABORTED);
     {
-        const hm_event *ev = last_phase_event(f);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = last_phase_event(f);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
             /* ⚠ WHICH wait expired is in `previous_phase`, which is why one
              * bound does not need two abort reasons to stay legible. */
-            HM_ASSERT_EQ(ev->u.calibration_phase.abort_reason, (uint8_t)HM_CAL_ABORT_NO_RESULT);
-            HM_ASSERT_EQ(ev->u.calibration_phase.previous_phase, (uint8_t)HM_CALP_MARKING_POSE0);
+            WR_ASSERT_EQ(ev->u.calibration_phase.abort_reason, (uint8_t)WR_CAL_ABORT_NO_RESULT);
+            WR_ASSERT_EQ(ev->u.calibration_phase.previous_phase, (uint8_t)WR_CALP_MARKING_POSE0);
         }
     }
     fake_close(f);
 }
 
-HM_TEST(a_result_that_never_comes_aborts_and_a_late_one_still_moves_the_flag)
+WR_TEST(a_result_that_never_comes_aborts_and_a_late_one_still_moves_the_flag)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_APPLYING);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_APPLYING);
 
-    run_to(f, f->now + (hm_time_us)4 * 1000 * 1000);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_ABORTED);
+    run_to(f, f->now + (wr_time_us)4 * 1000 * 1000);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_ABORTED);
     {
-        const hm_event *ev = last_phase_event(f);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = last_phase_event(f);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.calibration_phase.previous_phase, (uint8_t)HM_CALP_APPLYING);
+            WR_ASSERT_EQ(ev->u.calibration_phase.previous_phase, (uint8_t)WR_CALP_APPLYING);
         }
     }
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNCALIBRATED);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNCALIBRATED);
 
     /*
      * ⚠ AND THEN IT ARRIVES ANYWAY.  Our bound is client policy; the device's
@@ -2335,12 +2335,12 @@ HM_TEST(a_result_that_never_comes_aborts_and_a_late_one_still_moves_the_flag)
      * about a frame that has just changed underneath the consumer.
      */
     feed_cal_result(f);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_ABORTED);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNKNOWN);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_CALIBRATION_UNSOLICITED), 1u);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_ABORTED);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNKNOWN);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_CALIBRATION_UNSOLICITED), 1u);
     f->now += 40000;
     feed_frame(f, 600u, ticks_for(600u), 0);
-    HM_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)HM_CAL_UNKNOWN);
+    WR_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)WR_CAL_UNKNOWN);
     fake_close(f);
 }
 
@@ -2356,53 +2356,53 @@ HM_TEST(a_result_that_never_comes_aborts_and_a_late_one_still_moves_the_flag)
  * the presence measurement decides, because that tests what the device is
  * emitting rather than what a byte claims about it.
  */
-HM_TEST(the_short_form_of_the_result_is_answered_and_its_status_byte_reported)
+WR_TEST(the_short_form_of_the_result_is_answered_and_its_status_byte_reported)
 {
     fake         *f = fake_open(NULL);
     const uint8_t short_form[2] = { 0x94, 0x2A };
 
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_APPLYING);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_APPLYING);
 
     feed(f, short_form, sizeof(short_form));
 
     /* Not a short frame, not an unknown message, and not silently swallowed. */
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_SHORT_FRAME), 0u);
-    HM_ASSERT_EQ(count_events(f, HM_EV_UNKNOWN_MESSAGE), 0u);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_CALIBRATION_STATUS_FORM), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_SHORT_FRAME), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_UNKNOWN_MESSAGE), 0u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_CALIBRATION_STATUS_FORM), 1u);
     {
         size_t i;
         int    seen = 0;
         for (i = 0; i < f->nevents; ++i) {
-            if (f->events[i].type == (uint16_t)HM_EV_WARNING &&
-                f->events[i].u.warning.code == (uint16_t)HM_WARN_CALIBRATION_STATUS_FORM) {
+            if (f->events[i].type == (uint16_t)WR_EV_WARNING &&
+                f->events[i].u.warning.code == (uint16_t)WR_WARN_CALIBRATION_STATUS_FORM) {
                 /* The byte itself travels, so a consumer that learns what the
                  * values mean can read them out of an existing recording. */
-                HM_ASSERT_EQ(f->events[i].u.warning.detail_i32, 0x2A);
+                WR_ASSERT_EQ(f->events[i].u.warning.detail_i32, 0x2A);
                 seen++;
             }
         }
-        HM_ASSERT_EQ(seen, 1);
+        WR_ASSERT_EQ(seen, 1);
     }
 
     /* The routine advances exactly as it does for the long form, and the flag
      * drops to UNKNOWN rather than claiming either outcome. */
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_VERIFYING);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNKNOWN);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_VERIFYING);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNKNOWN);
     fake_close(f);
 }
 
-HM_TEST(aborting_after_the_transform_completes_rather_than_pretending_nothing_happened)
+WR_TEST(aborting_after_the_transform_completes_rather_than_pretending_nothing_happened)
 {
     fake *f = cal_open_to_verifying();
 
@@ -2413,29 +2413,29 @@ HM_TEST(aborting_after_the_transform_completes_rather_than_pretending_nothing_ha
      * cancelling a calibration, and reporting ABORTED would tell a consumer
      * nothing happened to a stream whose frame had just changed.
      */
-    HM_ASSERT_EQ(hm_calibration_abort(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_abort(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_COMPLETE);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_COMPLETE);
     {
-        const hm_event *ev = last_phase_event(f);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = last_phase_event(f);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
             /* COMPLETE, and the reason says who ended it. */
-            HM_ASSERT_EQ(ev->u.calibration_phase.phase, (uint8_t)HM_CALP_COMPLETE);
-            HM_ASSERT_EQ(ev->u.calibration_phase.abort_reason, (uint8_t)HM_CAL_ABORT_CALLER);
+            WR_ASSERT_EQ(ev->u.calibration_phase.phase, (uint8_t)WR_CALP_COMPLETE);
+            WR_ASSERT_EQ(ev->u.calibration_phase.abort_reason, (uint8_t)WR_CAL_ABORT_CALLER);
         }
     }
     /* ⚠ Complete is not calibrated: the check was declined, so the angle stays
      * NaN and every later sample says UNKNOWN. */
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNKNOWN);
-    HM_ASSERT(isnan(hm_calibration_presence_angle_deg(f->s)));
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNKNOWN);
+    WR_ASSERT(isnan(wr_calibration_presence_angle_deg(f->s)));
     fake_close(f);
 }
 
-HM_TEST(link_down_aborts_the_routine_and_takes_the_anchor_with_it)
+WR_TEST(link_down_aborts_the_routine_and_takes_the_anchor_with_it)
 {
-    fake *f = cal_measure_at(0.5, HM_PRESENCE_MAX_SAMPLES);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_CALIBRATED);
+    fake *f = cal_measure_at(0.5, WR_PRESENCE_MAX_SAMPLES);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_CALIBRATED);
 
     /*
      * ⚠ §8.3 measured 0.70° immediately before dropping a link and 18.80° at
@@ -2443,40 +2443,40 @@ HM_TEST(link_down_aborts_the_routine_and_takes_the_anchor_with_it)
      * anchor goes with it: it describes a reference pose under a mount transform
      * the device no longer holds.
      */
-    hm_session_on_link_down(f->s, HM_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
+    wr_session_on_link_down(f->s, WR_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
     drain(f);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNCALIBRATED);
-    HM_ASSERT(isnan(hm_calibration_presence_angle_deg(f->s)));
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNCALIBRATED);
+    WR_ASSERT(isnan(wr_calibration_presence_angle_deg(f->s)));
     {
-        hm_calibration_presence_event anchor;
-        HM_ASSERT_EQ(hm_calibration_reference_anchor(f->s, &anchor), HM_ERR_INVALID_STATE);
+        wr_calibration_presence_event anchor;
+        WR_ASSERT_EQ(wr_calibration_reference_anchor(f->s, &anchor), WR_ERR_INVALID_STATE);
     }
     fake_close(f);
 }
 
-HM_TEST(a_routine_in_flight_names_the_link_rather_than_the_stream_it_also_lost)
+WR_TEST(a_routine_in_flight_names_the_link_rather_than_the_stream_it_also_lost)
 {
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
 
     /* A link drop stops the stream too, so both reasons are true — and the
      * larger one is the one worth reporting: a stream stop ends the routine,
      * where a link drop destroys the calibration outright (§8.3). */
-    hm_session_on_link_down(f->s, HM_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
+    wr_session_on_link_down(f->s, WR_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
     drain(f);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_ABORTED);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_ABORTED);
     {
-        const hm_event *ev = last_phase_event(f);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = last_phase_event(f);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.calibration_phase.abort_reason, (uint8_t)HM_CAL_ABORT_LINK_LOST);
+            WR_ASSERT_EQ(ev->u.calibration_phase.abort_reason, (uint8_t)WR_CAL_ABORT_LINK_LOST);
         }
     }
     fake_close(f);
@@ -2485,77 +2485,77 @@ HM_TEST(a_routine_in_flight_names_the_link_rather_than_the_stream_it_also_lost)
 /*
  * ⚠⚠ A STOP THE DEVICE NEVER ANSWERS MUST NOT WEDGE THE SESSION.
  *
- * implementation-review I9.  stop_stream() set HM_STREAM_STOPPING and queued
+ * implementation-review I9.  stop_stream() set WR_STREAM_STOPPING and queued
  * `83`, and the only exit was the device's own `0x83`.  Nothing armed a
  * deadline and no §5.7 row covered it — the ONE device-facing wait in that
  * table without a bound, where the bring-up, the stream START, the calibration
  * round trip, the bracket and the power-off linger all have one.
  *
  * ⚠ The failure is silent and total: start_stream() returns
- * HM_ERR_INVALID_STATE, every hm_calibration_* call returns HM_ERR_NO_STREAM,
- * history never issues, hm_history_resident_range() refuses — and no event or
+ * WR_ERR_INVALID_STATE, every wr_calibration_* call returns WR_ERR_NO_STREAM,
+ * history never issues, wr_history_resident_range() refuses — and no event or
  * warning explains any of it.  A host that simply stopped draining
  * poll_writes(), so the `83` never left, reaches the same place.
  */
-HM_TEST(a_stop_the_device_never_answers_is_bounded_like_every_other_wait)
+WR_TEST(a_stop_the_device_never_answers_is_bounded_like_every_other_wait)
 {
-    hm_session_config cfg = hm_session_config_default();
+    wr_session_config cfg = wr_session_config_default();
     fake             *f;
 
     f = fake_open(&cfg);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
 
-    HM_ASSERT_EQ(hm_session_stop_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_stop_stream(f->s), WR_OK);
     drain(f);
     /* ⚠ And the device says nothing at all from here on. */
 
     /* The wait is visible as a deadline rather than as a hope. */
-    HM_ASSERT(hm_session_next_due_us(f->s) <= f->now + cfg.policy.stream_start_timeout_us);
+    WR_ASSERT(wr_session_next_due_us(f->s) <= f->now + cfg.policy.stream_start_timeout_us);
 
-    run_to(f, f->now + (hm_time_us)cfg.policy.stream_start_timeout_us + 1000);
+    run_to(f, f->now + (wr_time_us)cfg.policy.stream_start_timeout_us + 1000);
 
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_STREAM_STOP_TIMEOUT), 1u);
-    HM_ASSERT_EQ(count_events(f, HM_EV_STREAM_STOPPED), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_STREAM_STOP_TIMEOUT), 1u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_STREAM_STOPPED), 1u);
     /* ⚠ And the session is usable again, which is the whole point. */
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     fake_close(f);
 }
 
 /* And the ordinary case is unaffected: the reply lands, the watchdog does not. */
-HM_TEST(a_stop_the_device_answers_leaves_no_watchdog_behind)
+WR_TEST(a_stop_the_device_answers_leaves_no_watchdog_behind)
 {
     const uint8_t stopped[] = { 0x83, 0x01 };
     fake         *f = fake_open(NULL);
 
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
-    HM_ASSERT_EQ(hm_session_stop_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_stop_stream(f->s), WR_OK);
     drain(f);
     feed(f, stopped, sizeof(stopped));
 
-    run_to(f, f->now + (hm_time_us)10 * 1000 * 1000);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_STREAM_STOP_TIMEOUT), 0u);
-    HM_ASSERT_EQ(count_events(f, HM_EV_STREAM_STOPPED), 1u);
+    run_to(f, f->now + (wr_time_us)10 * 1000 * 1000);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_STREAM_STOP_TIMEOUT), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_STREAM_STOPPED), 1u);
     fake_close(f);
 }
 
-HM_TEST(a_stopped_stream_ends_the_routine_and_a_restart_does_not_carry_one_across)
+WR_TEST(a_stopped_stream_ends_the_routine_and_a_restart_does_not_carry_one_across)
 {
     const uint8_t stopped[] = { 0x83, 0x01 };
-    fake         *f = cal_measure_at(0.5, HM_PRESENCE_MAX_SAMPLES);
+    fake         *f = cal_measure_at(0.5, WR_PRESENCE_MAX_SAMPLES);
 
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_CALIBRATED);
-    HM_ASSERT_EQ(hm_session_stop_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_CALIBRATED);
+    WR_ASSERT_EQ(wr_session_stop_stream(f->s), WR_OK);
     drain(f);
     feed(f, stopped, sizeof(stopped));
     /* Nothing is being sampled anywhere while stopped, so nothing is labelled
      * and the state is left alone. */
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_CALIBRATED);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_CALIBRATED);
 
     /*
      * ⚠ But a restart produces samples again, and whether it costs the
@@ -2564,77 +2564,77 @@ HM_TEST(a_stopped_stream_ends_the_routine_and_a_restart_does_not_carry_one_acros
      * across an unmeasured boundary and samples that say we no longer know; the
      * second is recoverable and the first is permanent and invisible.
      */
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(count_events(f, HM_EV_STREAM_RESTARTED), 1u);
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNKNOWN);
+    WR_ASSERT_EQ(count_events(f, WR_EV_STREAM_RESTARTED), 1u);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNKNOWN);
     {
-        hm_calibration_presence_event anchor;
-        HM_ASSERT_EQ(hm_calibration_reference_anchor(f->s, &anchor), HM_ERR_INVALID_STATE);
+        wr_calibration_presence_event anchor;
+        WR_ASSERT_EQ(wr_calibration_reference_anchor(f->s, &anchor), WR_ERR_INVALID_STATE);
     }
     fake_close(f);
 }
 
-HM_TEST(a_stream_that_stops_mid_routine_aborts_it_with_the_reason)
+WR_TEST(a_stream_that_stops_mid_routine_aborts_it_with_the_reason)
 {
     const uint8_t stopped[] = { 0x83, 0x01 };
 
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 100u, ticks_for(100u), 0);
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_OBSERVING_RAISE);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_OBSERVING_RAISE);
 
-    HM_ASSERT_EQ(hm_session_stop_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_stop_stream(f->s), WR_OK);
     drain(f);
     feed(f, stopped, sizeof(stopped));
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_ABORTED);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_ABORTED);
     {
-        const hm_event *ev = last_phase_event(f);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = last_phase_event(f);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.calibration_phase.abort_reason, (uint8_t)HM_CAL_ABORT_STREAM_LOST);
+            WR_ASSERT_EQ(ev->u.calibration_phase.abort_reason, (uint8_t)WR_CAL_ABORT_STREAM_LOST);
         }
     }
     /* And the raise limit went with it: an aborted routine leaves no deadline
      * armed behind it. */
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_ERR_NO_STREAM);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_ERR_NO_STREAM);
     fake_close(f);
 }
 
-HM_TEST(a_restarted_stream_is_reported_never_silent)
+WR_TEST(a_restarted_stream_is_reported_never_silent)
 {
     const uint8_t stopped[] = { 0x83, 0x01 };
 
     fake *f = fake_open(NULL);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     feed_frame(f, 1u, ticks_for(1u), 0);
     {
-        uint64_t first_id = hm_session_stream_id(f->s);
+        uint64_t first_id = wr_session_stream_id(f->s);
 
         /* ⚠ One stream, opened once, left open (AR B8): a second start while
          * one is running is refused rather than obeyed. */
-        HM_ASSERT(hm_session_start_stream(f->s) < HM_OK);
+        WR_ASSERT(wr_session_start_stream(f->s) < WR_OK);
 
-        HM_ASSERT_EQ(hm_session_stop_stream(f->s), HM_OK);
+        WR_ASSERT_EQ(wr_session_stop_stream(f->s), WR_OK);
         drain(f);
         feed(f, stopped, sizeof(stopped));
-        HM_ASSERT_EQ(count_events(f, HM_EV_STREAM_STOPPED), 1u);
+        WR_ASSERT_EQ(count_events(f, WR_EV_STREAM_STOPPED), 1u);
 
-        HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+        WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
         drain(f);
         /* §7.6 lists restarting FIRST among the five silent ways capture goes
          * wrong: it clears the buffer, resets the index space and starts the
          * clock fit from nothing. */
-        HM_ASSERT_EQ(count_events(f, HM_EV_STREAM_RESTARTED), 1u);
-        HM_ASSERT(hm_session_stream_id(f->s) != first_id);
+        WR_ASSERT_EQ(count_events(f, WR_EV_STREAM_RESTARTED), 1u);
+        WR_ASSERT(wr_session_stream_id(f->s) != first_id);
     }
     fake_close(f);
 }
@@ -2650,7 +2650,7 @@ HM_TEST(a_restarted_stream_is_reported_never_silent)
  * So a synthetic step-1 reply here proves the gather HANDLES a full-rate reply;
  * it cannot prove a real device produces one, and a real device at rest returns
  * an even one-in-eight that is indistinguishable from a broken full-rate path.
- * The evidence for the premise is hardware's: `swings.hmwire` carries five
+ * The evidence for the premise is hardware's: `swings.wrwire` carries five
  * mid-stream pulls whose longest unbroken step-1 runs were 278, 292, 308, 294
  * and 330 records — 413 ms of uninterrupted 799 Hz in the best of them.
  *
@@ -2671,14 +2671,14 @@ static const uint8_t k_mark_end[] = { 0xa1, 0x01 };
  * means NO EVIDENCE rather than agreement. */
 static fake *hist_open(uint32_t frames, uint32_t first_index)
 {
-    hm_session_config cfg = hm_session_config_default();
-    hm_time_us        t0;
+    wr_session_config cfg = wr_session_config_default();
+    wr_time_us        t0;
     fake             *f;
 
-    cfg.memory.digest_ring_capacity = HM_DIGEST_RING_RECOMMENDED;
+    cfg.memory.digest_ring_capacity = WR_DIGEST_RING_RECOMMENDED;
     f = fake_open(&cfg);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
 
     t0 = f->now;
@@ -2688,9 +2688,9 @@ static fake *hist_open(uint32_t frames, uint32_t first_index)
          * which is why the fit is a lower envelope.  The spread matters here as
          * well as the offset: it is what `precision_us` measures, and an
          * alignment budget is judged against it. */
-        hm_time_us jitter = 200 + (hm_time_us)((i * 7919u) % 5000u);
-        f->now = t0 + (hm_time_us)((double)(i * HIST_LIVE_STEP) / HIST_TRUE_RATE * 1e6) + jitter;
-        hm_session_tick(f->s, f->now);
+        wr_time_us jitter = 200 + (wr_time_us)((i * 7919u) % 5000u);
+        f->now = t0 + (wr_time_us)((double)(i * HIST_LIVE_STEP) / HIST_TRUE_RATE * 1e6) + jitter;
+        wr_session_tick(f->s, f->now);
         feed_frame(f, (uint16_t)(index & 0xffffu), ticks_for(index), 0);
     }
     return f;
@@ -2700,7 +2700,7 @@ static fake *hist_open(uint32_t frames, uint32_t first_index)
 static void hist_live_frame(fake *f, uint32_t index)
 {
     f->now += 40000;
-    hm_session_tick(f->s, f->now);
+    wr_session_tick(f->s, f->now);
     feed_frame(f, (uint16_t)(index & 0xffffu), ticks_for(index), 0);
 }
 
@@ -2724,26 +2724,26 @@ static void feed_history(fake *f, uint32_t first, uint32_t last, uint32_t step)
 /*
  * A request for exactly the indices [first, last], expressed in HOST time the
  * way a consumer would.  ⚠ The one-microsecond nudge at each end is the
- * half-open/inclusive boundary of hm_clock_index_range_for_time(), pushed away
+ * half-open/inclusive boundary of wr_clock_index_range_for_time(), pushed away
  * from the rounding edge rather than sat on it.
  */
-static hm_history_request hist_request(fake *f, uint32_t first, uint32_t last)
+static wr_history_request hist_request(fake *f, uint32_t first, uint32_t last)
 {
-    hm_clock_snapshot  snap;
-    hm_history_request r;
+    wr_clock_snapshot  snap;
+    wr_history_request r;
 
     memset(&r, 0, sizeof(r));
-    HM_ASSERT_EQ(hm_session_clock(f->s, &snap), HM_OK);
-    r.window.start_us = hm_clock_to_host_us(&snap, first) - 1;
-    r.window.end_us = hm_clock_to_host_us(&snap, last) + 1;
-    r.deadline_us = f->now + (hm_time_us)60 * 1000 * 1000;
+    WR_ASSERT_EQ(wr_session_clock(f->s, &snap), WR_OK);
+    r.window.start_us = wr_clock_to_host_us(&snap, first) - 1;
+    r.window.end_us = wr_clock_to_host_us(&snap, last) + 1;
+    r.deadline_us = f->now + (wr_time_us)60 * 1000 * 1000;
     r.max_attempts = 1u;
     return r;
 }
 
-static const hm_event *find_last_event(const fake *f, hm_event_type type)
+static const wr_event *find_last_event(const fake *f, wr_event_type type)
 {
-    const hm_event *found = NULL;
+    const wr_event *found = NULL;
     for (size_t i = 0; i < f->nevents; ++i) {
         if (f->events[i].type == (uint16_t)type) {
             found = &f->events[i];
@@ -2777,12 +2777,12 @@ static uint16_t a1_last(const fake *f, size_t at)
 /* ------------------------------------------------------------------------ */
 /* Increment 5 — the gather, end to end                                       */
 /* ------------------------------------------------------------------------ */
-HM_TEST(a_mid_stream_pull_is_complete_dense_and_dated_by_its_own_fit)
+WR_TEST(a_mid_stream_pull_is_complete_dense_and_dated_by_its_own_fit)
 {
     const uint32_t     first = 7000u;
     const uint32_t     last = 7399u;
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             live_before;
     size_t             writes_before;
@@ -2790,26 +2790,26 @@ HM_TEST(a_mid_stream_pull_is_complete_dense_and_dated_by_its_own_fit)
 
     req = hist_request(f, first, last);
     writes_before = f->nwritten;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
-    HM_ASSERT(id != 0u);
-    HM_ASSERT_EQ(hm_history_pending(f->s), 1u);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
+    WR_ASSERT(id != 0u);
+    WR_ASSERT_EQ(wr_history_pending(f->s), 1u);
     drain(f);
 
     /* ⚠ ONE `a1`, in place, with the range re-wrapped to u16be (§7.1).  The
      * stream is never stopped: doing so would cost a fresh index space, a clock
      * fit rebuilt from nothing and a calibration to re-run (§7.5). */
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
-    HM_ASSERT_EQ(count_writes(f, 0x83, writes_before), 0u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(count_writes(f, 0x83, writes_before), 0u);
     {
         size_t at = last_a1(f);
-        HM_ASSERT(at != SIZE_MAX);
-        HM_ASSERT_EQ(a1_first(f, at), (uint16_t)first);
-        HM_ASSERT_EQ(a1_last(f, at), (uint16_t)last);
+        WR_ASSERT(at != SIZE_MAX);
+        WR_ASSERT_EQ(a1_first(f, at), (uint16_t)first);
+        WR_ASSERT_EQ(a1_last(f, at), (uint16_t)last);
     }
 
     /* collect() never blocks; it says PENDING until a block exists. */
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_PENDING);
-    HM_ASSERT(b == NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_PENDING);
+    WR_ASSERT(b == NULL);
 
     live_before = f->nlive;
     feed_history(f, first, last, 1u);
@@ -2820,33 +2820,33 @@ HM_TEST(a_mid_stream_pull_is_complete_dense_and_dated_by_its_own_fit)
      * discriminator, so 400 bulk arrivals reaching the live ring would look
      * exactly like a burst of real motion.
      */
-    HM_ASSERT_EQ(f->nlive, live_before);
+    WR_ASSERT_EQ(f->nlive, live_before);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b == NULL) {
         fake_close(f);
         return;
     }
-    HM_ASSERT_EQ(hm_history_pending(f->s), 0u);
+    WR_ASSERT_EQ(wr_history_pending(f->s), 0u);
 
-    HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_COMPLETE);
-    HM_ASSERT_EQ(b->attempts, 1u);
-    HM_ASSERT_EQ(b->sample_count, (size_t)(last - first + 1u));
-    HM_ASSERT_EQ(b->delivered_count, 1u);
-    HM_ASSERT_EQ(b->delivered_indices[0].first, first);
-    HM_ASSERT_EQ(b->delivered_indices[0].last, last);
-    HM_ASSERT_EQ(b->gap_count, 0u);
-    HM_ASSERT_EQ(b->largest_gap_us, 0u);
-    HM_ASSERT_NEAR(b->coverage_fraction, 1.0, 1e-9);
+    WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_COMPLETE);
+    WR_ASSERT_EQ(b->attempts, 1u);
+    WR_ASSERT_EQ(b->sample_count, (size_t)(last - first + 1u));
+    WR_ASSERT_EQ(b->delivered_count, 1u);
+    WR_ASSERT_EQ(b->delivered_indices[0].first, first);
+    WR_ASSERT_EQ(b->delivered_indices[0].last, last);
+    WR_ASSERT_EQ(b->gap_count, 0u);
+    WR_ASSERT_EQ(b->largest_gap_us, 0u);
+    WR_ASSERT_NEAR(b->coverage_fraction, 1.0, 1e-9);
     /* ⚠ Density AND coverage, never one alone: a count cannot tell "dense over
      * half the range" from "half-dense over all of it" (AR C4). */
-    HM_ASSERT_NEAR(b->density, 1.0, 1e-9);
-    HM_ASSERT_NEAR(b->achieved_hz, HIST_TRUE_RATE, 1.0);
-    HM_ASSERT_EQ(b->coverage_overflowed, 0u);
-    HM_ASSERT_EQ(b->layout_version, HM_SAMPLE_LAYOUT_VERSION);
-    HM_ASSERT_EQ(b->sample_stride, (uint32_t)sizeof(hm_sample));
-    HM_ASSERT_EQ(b->config.bits, HM_CONFIG_OBSERVED_DEFAULT);
+    WR_ASSERT_NEAR(b->density, 1.0, 1e-9);
+    WR_ASSERT_NEAR(b->achieved_hz, HIST_TRUE_RATE, 1.0);
+    WR_ASSERT_EQ(b->coverage_overflowed, 0u);
+    WR_ASSERT_EQ(b->layout_version, WR_SAMPLE_LAYOUT_VERSION);
+    WR_ASSERT_EQ(b->sample_stride, (uint32_t)sizeof(wr_sample));
+    WR_ASSERT_EQ(b->config.bits, WR_CONFIG_OBSERVED_DEFAULT);
 
     /*
      * ⚠ THE BLOCK IS INTERNALLY REPRODUCIBLE: the fit it carries is the one
@@ -2854,18 +2854,18 @@ HM_TEST(a_mid_stream_pull_is_complete_dense_and_dated_by_its_own_fit)
      * yields the same answer it did on the day (AR C9).
      */
     for (size_t i = 0; i < b->sample_count; ++i) {
-        const hm_sample *sm = &b->samples[i];
-        HM_ASSERT_EQ(sm->sample_index, first + (uint32_t)i);
-        HM_ASSERT_EQ(sm->source, (uint8_t)HM_SOURCE_HISTORY);
+        const wr_sample *sm = &b->samples[i];
+        WR_ASSERT_EQ(sm->sample_index, first + (uint32_t)i);
+        WR_ASSERT_EQ(sm->source, (uint8_t)WR_SOURCE_HISTORY);
         /* ⚠ Bulk arrival timestamps carry no information at all (§10.1). */
-        HM_ASSERT_EQ(sm->host_recv_us, HM_TIME_UNKNOWN);
-        HM_ASSERT((sm->flags & (uint16_t)HM_SAMPLE_NO_FIT) == 0u);
-        HM_ASSERT_EQ(sm->host_time_us, hm_clock_to_host_us(&b->fit, sm->sample_index));
+        WR_ASSERT_EQ(sm->host_recv_us, WR_TIME_UNKNOWN);
+        WR_ASSERT((sm->flags & (uint16_t)WR_SAMPLE_NO_FIT) == 0u);
+        WR_ASSERT_EQ(sm->host_time_us, wr_clock_to_host_us(&b->fit, sm->sample_index));
         /* Device time comes from the frame alone and never waits for a fit. */
-        HM_ASSERT(sm->lower_arm.device_time_us != HM_TIME_UNKNOWN);
+        WR_ASSERT(sm->lower_arm.device_time_us != WR_TIME_UNKNOWN);
         if (i > 0u) {
-            HM_ASSERT(sm->sample_index > b->samples[i - 1u].sample_index);
-            HM_ASSERT(sm->host_time_us > b->samples[i - 1u].host_time_us);
+            WR_ASSERT(sm->sample_index > b->samples[i - 1u].sample_index);
+            WR_ASSERT(sm->host_time_us > b->samples[i - 1u].host_time_us);
         }
     }
 
@@ -2874,45 +2874,45 @@ HM_TEST(a_mid_stream_pull_is_complete_dense_and_dated_by_its_own_fit)
      * mismatch: a zero mismatch count over zero samples reads identically to a
      * check that silently stopped running (§8.8).
      */
-    HM_ASSERT(b->live_overlap_samples > 0u);
-    HM_ASSERT_EQ(b->live_overlap_mismatches, 0u);
+    WR_ASSERT(b->live_overlap_samples > 0u);
+    WR_ASSERT_EQ(b->live_overlap_mismatches, 0u);
 
     /* ⚠ The pull cost the session a hole of its own width, and nothing on the
      * wire marks it (§7.5, B11). */
-    HM_ASSERT(b->self_recording_gap.end_us > b->self_recording_gap.start_us);
+    WR_ASSERT(b->self_recording_gap.end_us > b->self_recording_gap.start_us);
 
     {
-        const hm_event *ev = find_last_event(f, HM_EV_HISTORY_BLIND_SPAN);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_last_event(f, WR_EV_HISTORY_BLIND_SPAN);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.history_blind_span.request_id, id);
+            WR_ASSERT_EQ(ev->u.history_blind_span.request_id, id);
         }
-        HM_ASSERT_EQ(count_events(f, HM_EV_HISTORY_STARTED), 1u);
-        HM_ASSERT_EQ(count_events(f, HM_EV_HISTORY_READY), 1u);
+        WR_ASSERT_EQ(count_events(f, WR_EV_HISTORY_STARTED), 1u);
+        WR_ASSERT_EQ(count_events(f, WR_EV_HISTORY_READY), 1u);
         /* Not an alarm: the reply's shape was exactly what was asked for. */
-        HM_ASSERT_EQ(count_warnings(f, HM_WARN_HISTORY_HOLED), 0u);
-        HM_ASSERT_EQ(count_warnings(f, HM_WARN_HISTORY_SHORT), 0u);
-        HM_ASSERT_EQ(count_warnings(f, HM_WARN_LIVE_GAP), 0u);
+        WR_ASSERT_EQ(count_warnings(f, WR_WARN_HISTORY_HOLED), 0u);
+        WR_ASSERT_EQ(count_warnings(f, WR_WARN_HISTORY_SHORT), 0u);
+        WR_ASSERT_EQ(count_warnings(f, WR_WARN_LIVE_GAP), 0u);
     }
 
-    hm_history_block_release(b);
+    wr_history_block_release(b);
     fake_close(f);
 }
 
-HM_TEST(a_block_outlives_the_session_that_produced_it)
+WR_TEST(a_block_outlives_the_session_that_produced_it)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             count;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7099u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed_history(f, 7000u, 7099u, 1u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b == NULL) {
         fake_close(f);
         return;
@@ -2925,8 +2925,8 @@ HM_TEST(a_block_outlives_the_session_that_produced_it)
         uint64_t orphan = 0u;
         hist_live_frame(f, 17800u);
         req = hist_request(f, 7200u, 7299u);
-        HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &orphan), HM_OK);
-        HM_ASSERT(orphan != id);
+        WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &orphan), WR_OK);
+        WR_ASSERT(orphan != id);
     }
 
     fake_close(f);
@@ -2937,9 +2937,9 @@ HM_TEST(a_block_outlives_the_session_that_produced_it)
      * releases it there, possibly after the session is gone.  It owns its
      * memory and a COPY of the allocator, which is what makes that legal.
      */
-    HM_ASSERT_EQ(b->sample_count, count);
-    HM_ASSERT_EQ(b->samples[0].sample_index, 7000u);
-    hm_history_block_release(b);
+    WR_ASSERT_EQ(b->sample_count, count);
+    WR_ASSERT_EQ(b->samples[0].sample_index, 7000u);
+    wr_history_block_release(b);
 
     /*
      * ⚠ A pointer that never came from here is rejected rather than freed.
@@ -2955,18 +2955,18 @@ HM_TEST(a_block_outlives_the_session_that_produced_it)
         /* Sized past the public struct so the magic read stays in bounds
          * whatever private header sits behind it. */
         static union {
-            hm_history_block pub;
-            uint8_t          raw[sizeof(hm_history_block) + 256];
+            wr_history_block pub;
+            uint8_t          raw[sizeof(wr_history_block) + 256];
         } foreign;
         memset(&foreign, 0, sizeof(foreign));
-        hm_history_block_release(&foreign.pub);
+        wr_history_block_release(&foreign.pub);
     }
 }
 
-HM_TEST(reserve_refuses_at_the_call_site_what_cannot_possibly_succeed)
+WR_TEST(reserve_refuses_at_the_call_site_what_cannot_possibly_succeed)
 {
-    hm_session_config  cfg = hm_session_config_default();
-    hm_history_request req;
+    wr_session_config  cfg = wr_session_config_default();
+    wr_history_request req;
     uint64_t           id = 99u;
     fake              *f;
 
@@ -2975,43 +2975,43 @@ HM_TEST(reserve_refuses_at_the_call_site_what_cannot_possibly_succeed)
      * STRUCTURAL refusal, unrelated to alignment quality. */
     f = fake_open(&cfg);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
-    req = hm_history_request_around(NULL, f->now);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_ERR_NO_FIT);
-    HM_ASSERT_EQ(id, 0u);
+    req = wr_history_request_around(NULL, f->now);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_ERR_NO_FIT);
+    WR_ASSERT_EQ(id, 0u);
     fake_close(f);
 
     f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7099u);
     {
-        hm_history_request bad = req;
+        wr_history_request bad = req;
         bad.window.end_us = bad.window.start_us;
-        HM_ASSERT_EQ(hm_history_reserve(f->s, &bad, &id), HM_ERR_INVALID_ARG);
+        WR_ASSERT_EQ(wr_history_reserve(f->s, &bad, &id), WR_ERR_INVALID_ARG);
         bad.window.end_us = bad.window.start_us - 1000;
-        HM_ASSERT_EQ(hm_history_reserve(f->s, &bad, &id), HM_ERR_INVALID_ARG);
+        WR_ASSERT_EQ(wr_history_reserve(f->s, &bad, &id), WR_ERR_INVALID_ARG);
     }
     {
         /* ⚠ The window's last sample does not exist until end_us, so a deadline
          * at or before it is unsatisfiable the moment it is made (R11). */
-        hm_history_request bad = req;
+        wr_history_request bad = req;
         bad.deadline_us = bad.window.end_us;
-        HM_ASSERT_EQ(hm_history_reserve(f->s, &bad, &id), HM_ERR_INVALID_ARG);
+        WR_ASSERT_EQ(wr_history_reserve(f->s, &bad, &id), WR_ERR_INVALID_ARG);
     }
     {
         /* Narrower than one sample period: it maps to no index at all. */
-        hm_history_request bad = req;
+        wr_history_request bad = req;
         bad.window.end_us = bad.window.start_us + 1;
-        HM_ASSERT_EQ(hm_history_reserve(f->s, &bad, &id), HM_ERR_INVALID_ARG);
+        WR_ASSERT_EQ(wr_history_reserve(f->s, &bad, &id), WR_ERR_INVALID_ARG);
     }
     {
         /* ⚠ Wider than the gather area — REFUSED, never truncated (R11): a
          * silently clipped window returns a block that looks complete. */
-        hm_history_request bad = req;
-        bad.window.end_us = bad.window.start_us + (hm_time_us)60 * 1000 * 1000;
+        wr_history_request bad = req;
+        bad.window.end_us = bad.window.start_us + (wr_time_us)60 * 1000 * 1000;
         bad.deadline_us = bad.window.end_us + 1000;
-        HM_ASSERT_EQ(hm_history_reserve(f->s, &bad, &id), HM_ERR_BUFFER_TOO_SMALL);
+        WR_ASSERT_EQ(wr_history_reserve(f->s, &bad, &id), WR_ERR_BUFFER_TOO_SMALL);
     }
 
     /* ⚠ The queue is short on purpose: requests are serialised and a pull takes
@@ -3021,16 +3021,16 @@ HM_TEST(reserve_refuses_at_the_call_site_what_cannot_possibly_succeed)
         uint64_t ids[8];
         size_t   accepted = 0u;
         for (size_t i = 0; i < 8u; ++i) {
-            if (hm_history_reserve(f->s, &req, &ids[i]) == HM_OK) {
+            if (wr_history_reserve(f->s, &req, &ids[i]) == WR_OK) {
                 accepted++;
             } else {
-                HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_ERR_BUSY);
+                WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_ERR_BUSY);
                 break;
             }
         }
-        HM_ASSERT(accepted > 0u);
-        HM_ASSERT(accepted < 8u);
-        HM_ASSERT_EQ(hm_history_pending(f->s), accepted);
+        WR_ASSERT(accepted > 0u);
+        WR_ASSERT(accepted < 8u);
+        WR_ASSERT_EQ(wr_history_pending(f->s), accepted);
     }
     fake_close(f);
 }
@@ -3038,11 +3038,11 @@ HM_TEST(reserve_refuses_at_the_call_site_what_cannot_possibly_succeed)
 /* ------------------------------------------------------------------------ */
 /* ⚠ §6.1.1 — the mapping is piecewise, and a retrieval is where it breaks    */
 /* ------------------------------------------------------------------------ */
-HM_TEST(the_fit_re_anchors_at_every_pull_and_a_queued_request_keeps_its_own_mapping)
+WR_TEST(the_fit_re_anchors_at_every_pull_and_a_queued_request_keeps_its_own_mapping)
 {
-    hm_history_request req;
-    hm_history_block  *ba = NULL;
-    hm_history_block  *bb = NULL;
+    wr_history_request req;
+    wr_history_block  *ba = NULL;
+    wr_history_block  *bb = NULL;
     uint64_t           id_a = 0u;
     uint64_t           id_b = 0u;
     size_t             writes_before;
@@ -3050,14 +3050,14 @@ HM_TEST(the_fit_re_anchors_at_every_pull_and_a_queued_request_keeps_its_own_mapp
 
     writes_before = f->nwritten;
     req = hist_request(f, 7000u, 7199u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id_a), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id_a), WR_OK);
     req = hist_request(f, 8000u, 8199u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id_b), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id_b), WR_OK);
     drain(f);
 
     /* ⚠ SERIALISED: a second `a1` cannot be issued until the first completes
      * (AR B16), even though both windows closed long ago. */
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
 
     feed_history(f, 7000u, 7199u, 1u);
 
@@ -3068,21 +3068,21 @@ HM_TEST(the_fit_re_anchors_at_every_pull_and_a_queued_request_keeps_its_own_mapp
      * picks the wrong wrap, so the second request waits for a frame.
      */
     drain(f);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
 
     hist_live_frame(f, 17800u);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 2u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 2u);
     feed_history(f, 8000u, 8199u, 1u);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id_a, &ba), HM_OK);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id_b, &bb), HM_OK);
-    HM_ASSERT(ba != NULL && bb != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id_a, &ba), WR_OK);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id_b, &bb), WR_OK);
+    WR_ASSERT(ba != NULL && bb != NULL);
     if (ba == NULL || bb == NULL) {
         fake_close(f);
         return;
     }
-    HM_ASSERT_EQ(ba->status, (uint8_t)HM_HIST_COMPLETE);
-    HM_ASSERT_EQ(bb->status, (uint8_t)HM_HIST_COMPLETE);
+    WR_ASSERT_EQ(ba->status, (uint8_t)WR_HIST_COMPLETE);
+    WR_ASSERT_EQ(bb->status, (uint8_t)WR_HIST_COMPLETE);
 
     /*
      * ⚠⚠ THE POINT OF THIS TEST.  The second request's window closed BEFORE the
@@ -3092,14 +3092,14 @@ HM_TEST(the_fit_re_anchors_at_every_pull_and_a_queued_request_keeps_its_own_mapp
      * about.  §10.2 measured what the other choice costs: a fit anchored once
      * was out by 111,311 ticks after five pulls, 1.70 wraps of 65,536.
      */
-    HM_ASSERT_EQ(ba->fit.anchor_host_us, bb->fit.anchor_host_us);
-    HM_ASSERT_EQ(ba->fit.anchor_index, bb->fit.anchor_index);
-    HM_ASSERT_EQ(ba->fit.first_index, bb->fit.first_index);
-    HM_ASSERT(bb->fit.observations > 100);
+    WR_ASSERT_EQ(ba->fit.anchor_host_us, bb->fit.anchor_host_us);
+    WR_ASSERT_EQ(ba->fit.anchor_index, bb->fit.anchor_index);
+    WR_ASSERT_EQ(ba->fit.first_index, bb->fit.first_index);
+    WR_ASSERT(bb->fit.observations > 100);
     for (size_t i = 0; i < bb->sample_count; ++i) {
-        HM_ASSERT_EQ(bb->samples[i].host_time_us,
-                     hm_clock_to_host_us(&bb->fit, bb->samples[i].sample_index));
-        HM_ASSERT((bb->samples[i].flags & (uint16_t)HM_SAMPLE_NO_FIT) == 0u);
+        WR_ASSERT_EQ(bb->samples[i].host_time_us,
+                     wr_clock_to_host_us(&bb->fit, bb->samples[i].sample_index));
+        WR_ASSERT((bb->samples[i].flags & (uint16_t)WR_SAMPLE_NO_FIT) == 0u);
     }
 
     /* ⚠ And the SESSION's fit did re-anchor: two pulls, two new stretches, so
@@ -3107,36 +3107,36 @@ HM_TEST(the_fit_re_anchors_at_every_pull_and_a_queued_request_keeps_its_own_mapp
      * first observation is on the far side of both. */
     hist_live_frame(f, 17832u);
     {
-        hm_clock_snapshot snap;
-        HM_ASSERT_EQ(hm_session_clock(f->s, &snap), HM_OK);
-        HM_ASSERT_EQ(snap.observations, 1);
-        HM_ASSERT_EQ(snap.first_index, 17832u);
-        HM_ASSERT(snap.first_index > ba->fit.first_index);
+        wr_clock_snapshot snap;
+        WR_ASSERT_EQ(wr_session_clock(f->s, &snap), WR_OK);
+        WR_ASSERT_EQ(snap.observations, 1);
+        WR_ASSERT_EQ(snap.first_index, 17832u);
+        WR_ASSERT(snap.first_index > ba->fit.first_index);
         /* One rate per connection: the offset restarted, the rate did not. */
-        HM_ASSERT((snap.flags & (uint32_t)HM_CLOCK_HAS_FIT) != 0u);
+        WR_ASSERT((snap.flags & (uint32_t)WR_CLOCK_HAS_FIT) != 0u);
     }
 
-    hm_history_block_release(ba);
-    hm_history_block_release(bb);
+    wr_history_block_release(ba);
+    wr_history_block_release(bb);
     fake_close(f);
 }
 
-HM_TEST(a_window_on_the_far_side_of_a_pull_is_refused_rather_than_addressed_wrong)
+WR_TEST(a_window_on_the_far_side_of_a_pull_is_refused_rather_than_addressed_wrong)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             writes_before;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7199u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed_history(f, 7000u, 7199u, 1u);
     {
-        hm_history_block *done = NULL;
-        HM_ASSERT_EQ(hm_history_collect(f->s, id, &done), HM_OK);
-        hm_history_block_release(done);
+        wr_history_block *done = NULL;
+        WR_ASSERT_EQ(wr_history_collect(f->s, id, &done), WR_OK);
+        wr_history_block_release(done);
     }
     hist_live_frame(f, 17800u);
     hist_live_frame(f, 17832u);
@@ -3154,21 +3154,21 @@ HM_TEST(a_window_on_the_far_side_of_a_pull_is_refused_rather_than_addressed_wron
     writes_before = f->nwritten;
     req = hist_request(f, 7000u, 7199u);
     req.alignment_budget_us = 0u; /* the quality gate is explicitly OFF */
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 0u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 0u);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_REFUSED_ALIGNMENT);
-        HM_ASSERT_EQ(b->sample_count, 0u);
-        HM_ASSERT_EQ(b->attempts, 0u);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_REFUSED_ALIGNMENT);
+        WR_ASSERT_EQ(b->sample_count, 0u);
+        WR_ASSERT_EQ(b->attempts, 0u);
         /* ⚠ The refusal is still an artefact: it carries the window, the fit it
          * was judged against and the tag, so a capture records that we declined
          * rather than recording nothing (AR B2). */
-        HM_ASSERT_EQ(b->requested.start_us, req.window.start_us);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->requested.start_us, req.window.start_us);
+        wr_history_block_release(b);
     }
     fake_close(f);
 }
@@ -3176,17 +3176,17 @@ HM_TEST(a_window_on_the_far_side_of_a_pull_is_refused_rather_than_addressed_wron
 /* ------------------------------------------------------------------------ */
 /* Increment 6 — the failure shapes                                           */
 /* ------------------------------------------------------------------------ */
-HM_TEST(an_over_wide_request_comes_back_holed_and_not_short)
+WR_TEST(an_over_wide_request_comes_back_holed_and_not_short)
 {
     const uint32_t     first = 7000u;
     const uint32_t     last = 7399u;
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, first, last);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /*
@@ -3201,42 +3201,42 @@ HM_TEST(an_over_wide_request_comes_back_holed_and_not_short)
     feed_history_records(f, last - 115u, last, 1u);
     feed(f, k_mark_end, sizeof(k_mark_end));
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b == NULL) {
         fake_close(f);
         return;
     }
-    HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_HOLED);
-    HM_ASSERT_EQ(b->sample_count, 232u);
-    HM_ASSERT_EQ(b->delivered_count, 2u);
-    HM_ASSERT_NEAR(b->coverage_fraction, 0.58, 0.005);
+    WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_HOLED);
+    WR_ASSERT_EQ(b->sample_count, 232u);
+    WR_ASSERT_EQ(b->delivered_count, 2u);
+    WR_ASSERT_NEAR(b->coverage_fraction, 0.58, 0.005);
     /* ⚠ Dense over 58 %, not half-dense over all of it — and only the two
      * numbers together can say which (AR C4).  The spacing inside the two runs
      * is step 1, so density reads the full internal rate while coverage reads
      * 0.58; a uniformly half-dense reply of the same count reads 0.5 and 0.5.
      * The hole between them is `largest_gap_us`, asserted below. */
-    HM_ASSERT_NEAR(b->density, 1.0, 1e-9);
-    HM_ASSERT(b->largest_gap_us > 0u);
-    HM_ASSERT_EQ(b->gap_count, 1u);
+    WR_ASSERT_NEAR(b->density, 1.0, 1e-9);
+    WR_ASSERT(b->largest_gap_us > 0u);
+    WR_ASSERT_EQ(b->gap_count, 1u);
     if (b->gap_count == 1u) {
-        HM_ASSERT_EQ(b->gaps[0].kind, (uint8_t)HM_GAP_NOT_DELIVERED);
-        HM_ASSERT_EQ(b->gaps[0].indices.first, first + 116u);
-        HM_ASSERT_EQ(b->gaps[0].indices.last, last - 116u);
+        WR_ASSERT_EQ(b->gaps[0].kind, (uint8_t)WR_GAP_NOT_DELIVERED);
+        WR_ASSERT_EQ(b->gaps[0].indices.first, first + 116u);
+        WR_ASSERT_EQ(b->gaps[0].indices.last, last - 116u);
     }
     /* 168 indices is far past §7.3's step-8 floor, so this holing cannot be the
      * motion-adaptive buffer and IS worth a warning. */
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_HISTORY_HOLED), 1u);
-    hm_history_block_release(b);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_HISTORY_HOLED), 1u);
+    wr_history_block_release(b);
     fake_close(f);
 }
 
-HM_TEST(an_at_rest_reply_is_holed_at_the_hundred_hertz_floor_and_that_is_not_an_error)
+WR_TEST(an_at_rest_reply_is_holed_at_the_hundred_hertz_floor_and_that_is_not_an_error)
 {
     const uint32_t     first = 7000u;
     const uint32_t     last = 7399u;
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             writes_before;
     fake              *f = hist_open(400u, 5000u);
@@ -3246,7 +3246,7 @@ HM_TEST(an_at_rest_reply_is_holed_at_the_hundred_hertz_floor_and_that_is_not_an_
     req.refill_gaps = true;
     req.max_attempts = 3u;
     writes_before = f->nwritten;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /*
@@ -3258,25 +3258,25 @@ HM_TEST(an_at_rest_reply_is_holed_at_the_hundred_hertz_floor_and_that_is_not_an_
     feed_history(f, first, last, 8u);
     drain(f);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b == NULL) {
         fake_close(f);
         return;
     }
-    HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_HOLED);
-    HM_ASSERT_EQ(b->sample_count, 50u);
+    WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_HOLED);
+    WR_ASSERT_EQ(b->sample_count, 50u);
     /* ⚠ §7.3's floor, stated as a density: the spacing IS step 8, so the field
      * reads 1/8.  It read 1.000 here until implementation-review I1 — the
      * divisor was the delivered count, which the session increments on the same
      * line as the numerator. */
-    HM_ASSERT_NEAR(b->density, 0.125, 1e-9);
+    WR_ASSERT_NEAR(b->density, 0.125, 1e-9);
     /* §7.3's own number for step 8, arrived at from the delivered indices. */
-    HM_ASSERT_NEAR(b->achieved_hz, 99.9, 1.5);
+    WR_ASSERT_NEAR(b->achieved_hz, 99.9, 1.5);
 
     /* ⚠ NO WARNING.  Every reply is holed and the holes are not an error; an
      * alarm on the normal shape of the data is how a real one stops being read. */
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_HISTORY_HOLED), 0u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_HISTORY_HOLED), 0u);
 
     /*
      * ⚠ AND NO REFILL.  Those indices were never stored, so asking again
@@ -3284,9 +3284,9 @@ HM_TEST(an_at_rest_reply_is_holed_at_the_hundred_hertz_floor_and_that_is_not_an_
      * recording (§7.5).  Without the floor, every at-rest pull would burn all
      * three attempts for no new data.
      */
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
-    HM_ASSERT_EQ(b->attempts, 1u);
-    hm_history_block_release(b);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(b->attempts, 1u);
+    wr_history_block_release(b);
     fake_close(f);
 }
 
@@ -3302,32 +3302,32 @@ HM_TEST(an_at_rest_reply_is_holed_at_the_hundred_hertz_floor_and_that_is_not_an_
  * differs completely between them.
  *
  * ⚠ BOTH SHAPES ARE BUILT THROUGH THE SESSION, not handed to a helper.  The test
- * this replaces fed `hm_coverage_density()` a sample count chosen independently
+ * this replaces fed `wr_coverage_density()` a sample count chosen independently
  * of its coverage set — a shape gather_record() cannot produce, which is why it
  * passed over a field pinned to 1.0 (implementation-review I1).
  */
-HM_TEST(density_separates_a_correct_twelve_percent_from_a_failed_one)
+WR_TEST(density_separates_a_correct_twelve_percent_from_a_failed_one)
 {
     const uint32_t     first = 7000u;
     const uint32_t     last = 7399u;
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
     /* Reply A: the buffer working correctly.  Every stored index arrived, and
      * the stored ones are one in eight because the wrist was still. */
     req = hist_request(f, first, last);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed_history(f, first, last, 8u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->sample_count, 50u);
-        HM_ASSERT_NEAR(b->coverage_fraction, 0.125, 1e-9);
-        HM_ASSERT_NEAR(b->density, 0.125, 1e-9);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->sample_count, 50u);
+        WR_ASSERT_NEAR(b->coverage_fraction, 0.125, 1e-9);
+        WR_ASSERT_NEAR(b->density, 0.125, 1e-9);
+        wr_history_block_release(b);
         b = NULL;
     }
     fake_close(f);
@@ -3336,28 +3336,28 @@ HM_TEST(density_separates_a_correct_twelve_percent_from_a_failed_one)
      * way at the full internal rate and then stopping. */
     f = hist_open(400u, 5000u);
     req = hist_request(f, first, last);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed_history(f, first, first + 49u, 1u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->sample_count, 50u);
-        HM_ASSERT_NEAR(b->coverage_fraction, 0.125, 1e-9);
+        WR_ASSERT_EQ(b->sample_count, 50u);
+        WR_ASSERT_NEAR(b->coverage_fraction, 0.125, 1e-9);
         /* ⚠ The number that separates them, and the only one that does. */
-        HM_ASSERT_MSG(b->density > 0.99,
+        WR_ASSERT_MSG(b->density > 0.99,
                       "a reply dense at step 1 must not read like the at-rest floor");
-        hm_history_block_release(b);
+        wr_history_block_release(b);
     }
     fake_close(f);
 }
 
-HM_TEST(a_refill_chases_only_the_gap_that_motion_cannot_explain)
+WR_TEST(a_refill_chases_only_the_gap_that_motion_cannot_explain)
 {
     const uint32_t     first = 7000u;
     const uint32_t     last = 7399u;
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             writes_before;
     fake              *f = hist_open(400u, 5000u);
@@ -3366,7 +3366,7 @@ HM_TEST(a_refill_chases_only_the_gap_that_motion_cannot_explain)
     req.refill_gaps = true;
     req.max_attempts = 3u;
     writes_before = f->nwritten;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     feed(f, k_mark_start, sizeof(k_mark_start));
@@ -3377,49 +3377,49 @@ HM_TEST(a_refill_chases_only_the_gap_that_motion_cannot_explain)
 
     /* ⚠ Still one: §6.1.1's rule applies to a refill exactly as it does to a
      * first attempt. */
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
     hist_live_frame(f, 17800u);
 
     /* ⚠ Safe to ask again in place: the device never stopped recording and `a1`
      * works mid-stream (AR C5).  The second ask is exactly the hole. */
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 2u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 2u);
     {
         size_t at = last_a1(f);
-        HM_ASSERT_EQ(a1_first(f, at), (uint16_t)(first + 116u));
-        HM_ASSERT_EQ(a1_last(f, at), (uint16_t)(last - 116u));
+        WR_ASSERT_EQ(a1_first(f, at), (uint16_t)(first + 116u));
+        WR_ASSERT_EQ(a1_last(f, at), (uint16_t)(last - 116u));
     }
 
     feed_history(f, first + 116u, last - 116u, 1u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_COMPLETE);
-        HM_ASSERT_EQ(b->attempts, 2u);
-        HM_ASSERT_EQ(b->sample_count, (size_t)(last - first + 1u));
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_COMPLETE);
+        WR_ASSERT_EQ(b->attempts, 2u);
+        WR_ASSERT_EQ(b->sample_count, (size_t)(last - first + 1u));
         /* ⚠ Merged by DEVICE INDEX — ascending, strictly monotonic and
          * deduplicated across the two attempts (AR C3). */
         for (size_t i = 1; i < b->sample_count; ++i) {
-            HM_ASSERT(b->samples[i].sample_index > b->samples[i - 1u].sample_index);
+            WR_ASSERT(b->samples[i].sample_index > b->samples[i - 1u].sample_index);
         }
         /* ⚠ Two stalls, one envelope: over-claiming a recording gap is the safe
          * direction, and one half-open range cannot say otherwise. */
-        HM_ASSERT(b->self_recording_gap.end_us > b->self_recording_gap.start_us);
-        hm_history_block_release(b);
+        WR_ASSERT(b->self_recording_gap.end_us > b->self_recording_gap.start_us);
+        wr_history_block_release(b);
     }
     fake_close(f);
 }
 
-HM_TEST(a_leading_end_marker_and_d0_03_is_a_refusal_and_never_a_bracket)
+WR_TEST(a_leading_end_marker_and_d0_03_is_a_refusal_and_never_a_bracket)
 {
     const uint8_t      device_error[] = { 0xd0, 0x03 };
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             live_before;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7199u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /*
@@ -3433,11 +3433,11 @@ HM_TEST(a_leading_end_marker_and_d0_03_is_a_refusal_and_never_a_bracket)
     feed(f, k_mark_end, sizeof(k_mark_end));
     live_before = f->nlive;
     hist_live_frame(f, 17800u);
-    HM_ASSERT_EQ(f->nlive, live_before + 1u); /* live never stopped */
+    WR_ASSERT_EQ(f->nlive, live_before + 1u); /* live never stopped */
 
     feed(f, device_error, sizeof(device_error));
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
         /*
          * ⚠ `d0 03` means nothing specific — seven distinct causes all returned
@@ -3447,51 +3447,51 @@ HM_TEST(a_leading_end_marker_and_d0_03_is_a_refusal_and_never_a_bracket)
          * cancelled the reservation.  What is left is a range the buffer no
          * longer holds.
          */
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_EVICTED);
-        HM_ASSERT_EQ(b->sample_count, 0u);
-        HM_ASSERT_EQ(b->attempts, 1u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_EVICTED);
+        WR_ASSERT_EQ(b->sample_count, 0u);
+        WR_ASSERT_EQ(b->attempts, 1u);
+        wr_history_block_release(b);
     }
     {
-        const hm_event *ev = find_event(f, HM_EV_DEVICE_ERROR);
-        HM_ASSERT(ev != NULL);
+        const wr_event *ev = find_event(f, WR_EV_DEVICE_ERROR);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.device_error.request_id, id);
+            WR_ASSERT_EQ(ev->u.device_error.request_id, id);
         }
     }
     /* No bracket was ever opened, so nothing reported a blind span. */
-    HM_ASSERT_EQ(count_events(f, HM_EV_HISTORY_BLIND_SPAN), 0u);
-    HM_ASSERT_EQ(count_events(f, HM_EV_HISTORY_STARTED), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_HISTORY_BLIND_SPAN), 0u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_HISTORY_STARTED), 0u);
     fake_close(f);
 }
 
-HM_TEST(a_request_that_times_out_keeps_what_arrived_and_orphans_the_replay)
+WR_TEST(a_request_that_times_out_keeps_what_arrived_and_orphans_the_replay)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             live_before;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7399u);
     /* ⚠ A pull that half-delivers forever is worse than one that fails (B7). */
-    req.deadline_us = f->now + (hm_time_us)400 * 1000;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    req.deadline_us = f->now + (wr_time_us)400 * 1000;
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     feed(f, k_mark_start, sizeof(k_mark_start));
     feed_history_records(f, 7000u, 7049u, 1u);
     run_to(f, req.deadline_us + 1000);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_TIMED_OUT);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_TIMED_OUT);
         /* Partial content is still valid, and still carries its coverage. */
-        HM_ASSERT_EQ(b->sample_count, 50u);
-        HM_ASSERT(b->coverage_fraction > 0.0);
-        HM_ASSERT(b->coverage_fraction < 1.0);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->sample_count, 50u);
+        WR_ASSERT(b->coverage_fraction > 0.0);
+        WR_ASSERT(b->coverage_fraction < 1.0);
+        wr_history_block_release(b);
     }
 
     /*
@@ -3502,12 +3502,12 @@ HM_TEST(a_request_that_times_out_keeps_what_arrived_and_orphans_the_replay)
      */
     live_before = f->nlive;
     feed_history_records(f, 7050u, 7199u, 1u);
-    HM_ASSERT_EQ(f->nlive, live_before);
-    HM_ASSERT_EQ(hm_history_pending(f->s), 0u);
+    WR_ASSERT_EQ(f->nlive, live_before);
+    WR_ASSERT_EQ(wr_history_pending(f->s), 0u);
 
     feed(f, k_mark_end, sizeof(k_mark_end));
     hist_live_frame(f, 17800u);
-    HM_ASSERT_EQ(f->nlive, live_before + 1u); /* and live comes back */
+    WR_ASSERT_EQ(f->nlive, live_before + 1u); /* and live comes back */
     fake_close(f);
 }
 
@@ -3515,7 +3515,7 @@ HM_TEST(a_request_that_times_out_keeps_what_arrived_and_orphans_the_replay)
  * ⚠⚠ CLOSE FINISHES WORK, IT DOES NOT DISCARD IT — and the function used to
  * assert that in a comment and undo it eight lines later.
  *
- * implementation-review I5.  hm_session_close() abandons every outstanding
+ * implementation-review I5.  wr_session_close() abandons every outstanding
  * reservation "before the queues are sealed, so the events reporting them still
  * reach the consumer", then cleared the event ring and made poll_events()
  * return 0 for ever after.  So the documented shape — close, then drain once
@@ -3523,89 +3523,89 @@ HM_TEST(a_request_that_times_out_keeps_what_arrived_and_orphans_the_replay)
  *
  * ⚠ The stop barrier is untouched by this, because it is about PRODUCTION.
  * Nothing is produced after close; the ring merely still holds what close
- * itself put there, exactly as hm_history_collect() already worked.
+ * itself put there, exactly as wr_history_collect() already worked.
  */
-HM_TEST(closing_still_hands_back_the_events_it_generated_while_closing)
+WR_TEST(closing_still_hands_back_the_events_it_generated_while_closing)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
-    hm_event           ev[16];
+    wr_history_request req;
+    wr_history_block  *b = NULL;
+    wr_event           ev[16];
     uint64_t           id = 0u;
     size_t             n;
     size_t             ready = 0;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7399u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed(f, k_mark_start, sizeof(k_mark_start));
     feed_history_records(f, 7000u, 7099u, 1u);
     drain(f); /* everything produced BEFORE the close is already taken */
 
-    hm_session_close(f->s);
+    wr_session_close(f->s);
 
-    n = hm_session_poll_events(f->s, ev, 16u);
+    n = wr_session_poll_events(f->s, ev, 16u);
     for (size_t i = 0; i < n; ++i) {
-        if (ev[i].type == (uint16_t)HM_EV_HISTORY_READY) {
+        if (ev[i].type == (uint16_t)WR_EV_HISTORY_READY) {
             ready++;
         }
     }
-    HM_ASSERT_MSG(ready == 1u,
+    WR_ASSERT_MSG(ready == 1u,
                   "the request close itself finished must report that it did");
 
     /* And the block is there too, carrying what had arrived. */
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_CANCELLED);
-        HM_ASSERT_EQ(b->sample_count, 100u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_CANCELLED);
+        WR_ASSERT_EQ(b->sample_count, 100u);
+        wr_history_block_release(b);
     }
 
     /* ⚠ The barrier itself: no WRITE survives a close, whatever else does. */
     {
-        hm_write_request w[4];
-        HM_ASSERT_EQ(hm_session_poll_writes(f->s, w, 4u), 0u);
+        wr_write_request w[4];
+        WR_ASSERT_EQ(wr_session_poll_writes(f->s, w, 4u), 0u);
     }
     fake_close(f);
 }
 
-HM_TEST(cancelling_materialises_a_block_with_whatever_arrived)
+WR_TEST(cancelling_materialises_a_block_with_whatever_arrived)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7399u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed(f, k_mark_start, sizeof(k_mark_start));
     feed_history_records(f, 7000u, 7099u, 1u);
 
-    HM_ASSERT_EQ(hm_history_cancel(f->s, id), HM_OK);
-    HM_ASSERT_EQ(hm_history_pending(f->s), 0u);
+    WR_ASSERT_EQ(wr_history_cancel(f->s, id), WR_OK);
+    WR_ASSERT_EQ(wr_history_pending(f->s), 0u);
     /* Cancelling twice is a programming error, not a second block. */
-    HM_ASSERT(hm_history_cancel(f->s, id) < HM_OK);
+    WR_ASSERT(wr_history_cancel(f->s, id) < WR_OK);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
         /* ⚠ A capture should record what it got even when the answer is
          * partial: the block carries its coverage either way. */
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_CANCELLED);
-        HM_ASSERT_EQ(b->sample_count, 100u);
-        HM_ASSERT_EQ(b->delivered_count, 1u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_CANCELLED);
+        WR_ASSERT_EQ(b->sample_count, 100u);
+        WR_ASSERT_EQ(b->delivered_count, 1u);
+        wr_history_block_release(b);
     }
     feed(f, k_mark_end, sizeof(k_mark_end));
     fake_close(f);
 }
 
-HM_TEST(a_link_drop_answers_every_request_at_once_and_says_the_calibration_went_with_it)
+WR_TEST(a_link_drop_answers_every_request_at_once_and_says_the_calibration_went_with_it)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     uint64_t           queued = 0u;
     uint32_t           index = 5000u + 400u * HIST_LIVE_STEP;
@@ -3613,25 +3613,25 @@ HM_TEST(a_link_drop_answers_every_request_at_once_and_says_the_calibration_went_
 
     /* Walk the routine as far as a passing presence check, so the samples this
      * block will carry were genuinely captured under a transform. */
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
     feed_cal_result(f);
-    HM_ASSERT_EQ(hm_calibration_confirm_reference_pose(f->s), HM_OK);
-    for (unsigned i = 0; i < HM_PRESENCE_MAX_SAMPLES; ++i) {
+    WR_ASSERT_EQ(wr_calibration_confirm_reference_pose(f->s), WR_OK);
+    for (unsigned i = 0; i < WR_PRESENCE_MAX_SAMPLES; ++i) {
         index += HIST_LIVE_STEP;
         f->now += 4000;
         feed_frame_split(f, (uint16_t)(index & 0xffffu), ticks_for(index), 0.5);
     }
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_CALIBRATED);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_CALIBRATED);
 
     req = hist_request(f, 7000u, 7399u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &queued), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &queued), WR_OK);
     drain(f);
     feed(f, k_mark_start, sizeof(k_mark_start));
     feed_history_records(f, 7000u, 7099u, 1u);
@@ -3639,51 +3639,51 @@ HM_TEST(a_link_drop_answers_every_request_at_once_and_says_the_calibration_went_
     /* ⚠ IMMEDIATELY, not at the deadline: the index space went with the link,
      * so the request can never be fulfilled and a consumer's gather has a
      * bounded wait (§8.4.1). */
-    hm_session_on_link_down(f->s, HM_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
+    wr_session_on_link_down(f->s, WR_LINK_DOWN_SUPERVISION_TIMEOUT, f->now + 1000);
     drain(f);
-    HM_ASSERT_EQ(hm_history_pending(f->s), 0u);
+    WR_ASSERT_EQ(wr_history_pending(f->s), 0u);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_LINK_LOST);
-        HM_ASSERT_EQ(b->sample_count, 100u);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_LINK_LOST);
+        WR_ASSERT_EQ(b->sample_count, 100u);
         /*
-         * ⚠⚠ THE ONE PLACE HM_CAL_LOST IS EVER WRITTEN.  No sample carries it —
+         * ⚠⚠ THE ONE PLACE WR_CAL_LOST IS EVER WRITTEN.  No sample carries it —
          * none can be captured between the loss and the notice of one — but
          * here it does work UNCALIBRATED cannot: these samples WERE taken under
          * a transform, and §8.3 measured 0.70° before dropping a link and
          * 18.80° at the same pose after reconnecting, strap untouched.  "There
          * never was one" would be a different and false claim.
          */
-        HM_ASSERT_EQ(b->calibration.state_at_start, (uint8_t)HM_CAL_CALIBRATED);
-        HM_ASSERT_EQ(b->calibration.state_at_end, (uint8_t)HM_CAL_LOST);
-        HM_ASSERT_EQ(b->calibration.spans_transition, 1u);
+        WR_ASSERT_EQ(b->calibration.state_at_start, (uint8_t)WR_CAL_CALIBRATED);
+        WR_ASSERT_EQ(b->calibration.state_at_end, (uint8_t)WR_CAL_LOST);
+        WR_ASSERT_EQ(b->calibration.spans_transition, 1u);
         /* And the angle it was measured at survives, so the claim is about
          * something rather than about nothing. */
-        HM_ASSERT(!isnan(b->calibration.presence_angle_deg));
+        WR_ASSERT(!isnan(b->calibration.presence_angle_deg));
         /* ⚠ No sample carries LOST, and that is a decision rather than an
          * omission (sample.h). */
         for (size_t i = 0; i < b->sample_count; ++i) {
-            HM_ASSERT(b->samples[i].calibration != (uint8_t)HM_CAL_LOST);
+            WR_ASSERT(b->samples[i].calibration != (uint8_t)WR_CAL_LOST);
         }
-        hm_history_block_release(b);
+        wr_history_block_release(b);
     }
     /* The one that never got its turn is answered too, with nothing in it. */
     b = NULL;
-    HM_ASSERT_EQ(hm_history_collect(f->s, queued, &b), HM_OK);
+    WR_ASSERT_EQ(wr_history_collect(f->s, queued, &b), WR_OK);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_LINK_LOST);
-        HM_ASSERT_EQ(b->sample_count, 0u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_LINK_LOST);
+        WR_ASSERT_EQ(b->sample_count, 0u);
+        wr_history_block_release(b);
     }
     fake_close(f);
 }
 
-HM_TEST(an_alignment_budget_refuses_before_any_radio_traffic)
+WR_TEST(an_alignment_budget_refuses_before_any_radio_traffic)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             writes_before;
     fake              *f = hist_open(400u, 5000u);
@@ -3695,56 +3695,56 @@ HM_TEST(an_alignment_budget_refuses_before_any_radio_traffic)
      * informing it (clock.h). */
     req.alignment_budget_us = 1u;
     writes_before = f->nwritten;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 0u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 0u);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_REFUSED_ALIGNMENT);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_REFUSED_ALIGNMENT);
         /* ⚠ Refusing AND RECORDING the refusal is the point (AR B2): the block
          * carries the fit it was judged against, so a consumer can write "we
          * declined this pull, and this is what the clock was worth" into the
          * capture's provenance. */
-        HM_ASSERT((b->fit.flags & (uint32_t)HM_CLOCK_HAS_FIT) != 0u);
+        WR_ASSERT((b->fit.flags & (uint32_t)WR_CLOCK_HAS_FIT) != 0u);
         /*
          * ⚠ AND EVERY GAP LIES INSIDE THE REQUEST (implementation-review I7).
          *
          * This path returns before `r->recorded` is written, and the sentinel
-         * that was supposed to catch that tested a WIDTH — but hm_index_range is
+         * that was supposed to catch that tested a WIDTH — but wr_index_range is
          * inclusive, so index_width({0,0}) is 1, not 0, and a zeroed range read
          * as "the single index 0".  The block then handed back a gap over [0,0]
          * and another over [1, window.last]: anchored below the request, in a
          * struct whose own header gives that invariant as the reason
          * `self_recording_gap` is a separate field.
          */
-        HM_ASSERT(b->gap_count > 0u);
+        WR_ASSERT(b->gap_count > 0u);
         for (size_t i = 0; i < b->gap_count; ++i) {
-            HM_ASSERT_MSG(b->gaps[i].indices.first >= b->requested_indices.first,
+            WR_ASSERT_MSG(b->gaps[i].indices.first >= b->requested_indices.first,
                           "a gap below the request is a statement about a span "
                           "nobody asked about");
-            HM_ASSERT(b->gaps[i].indices.last <= b->requested_indices.last);
+            WR_ASSERT(b->gaps[i].indices.last <= b->requested_indices.last);
         }
-        hm_history_block_release(b);
+        wr_history_block_release(b);
     }
     fake_close(f);
 }
 
-HM_TEST(a_legacy_stream_records_the_refusal_rather_than_returning_a_status)
+WR_TEST(a_legacy_stream_records_the_refusal_rather_than_returning_a_status)
 {
-    hm_session_config  cfg = hm_session_config_default();
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_session_config  cfg = wr_session_config_default();
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     uint8_t            frame[1 + 42];
     const uint8_t      started[] = { 0x82, 0x01 };
     fake              *f;
 
-    cfg.stream_config = hm_stream_config_legacy();
+    cfg.stream_config = wr_stream_config_legacy();
     f = fake_open(&cfg);
     bring_up(f);
-    HM_ASSERT_EQ(hm_session_start_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_start_stream(f->s), WR_OK);
     drain(f);
     memset(frame, 0, sizeof(frame));
     frame[0] = 0x7f;
@@ -3757,42 +3757,42 @@ HM_TEST(a_legacy_stream_records_the_refusal_rather_than_returning_a_status)
      * ⚠ §6.3.1: a 0x7f record has no header, so there is no counter for `a1` to
      * address and no fit for a window to map through.  The reservation
      * therefore succeeds and its block is immediately collectable carrying
-     * HM_HIST_NOT_ALIGNABLE — refusing with a bare status code would leave the
+     * WR_HIST_NOT_ALIGNABLE — refusing with a bare status code would leave the
      * capture with no record of why nothing was retrieved.
      */
-    req = hm_history_request_around(NULL, f->now - (hm_time_us)2 * 1000 * 1000);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
-    HM_ASSERT(id != 0u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    req = wr_history_request_around(NULL, f->now - (wr_time_us)2 * 1000 * 1000);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
+    WR_ASSERT(id != 0u);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_NOT_ALIGNABLE);
-        HM_ASSERT_EQ(b->sample_count, 0u);
-        HM_ASSERT_EQ(b->attempts, 0u);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_NOT_ALIGNABLE);
+        WR_ASSERT_EQ(b->sample_count, 0u);
+        WR_ASSERT_EQ(b->attempts, 0u);
         /* ⚠ And no gaps: the window never reached an index range at all, so
          * "one gap at index 0" would describe a span nobody identified. */
-        HM_ASSERT_EQ(b->gap_count, 0u);
-        HM_ASSERT_EQ(b->delivered_count, 0u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->gap_count, 0u);
+        WR_ASSERT_EQ(b->delivered_count, 0u);
+        wr_history_block_release(b);
     }
-    HM_ASSERT_EQ(count_writes(f, 0xa1, 0u), 0u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, 0u), 0u);
     fake_close(f);
 }
 
 /* ------------------------------------------------------------------------ */
 /* Increment 7 — the wrap split, the depth bracket, the eviction estimate     */
 /* ------------------------------------------------------------------------ */
-HM_TEST(a_window_across_the_index_wrap_is_issued_as_two_asks_and_merged)
+WR_TEST(a_window_across_the_index_wrap_is_issued_as_two_asks_and_merged)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             writes_before;
     size_t             at;
     /* Start high enough that 400 live frames at step 32 cross 65536. */
     fake *f = hist_open(400u, 60000u);
 
-    HM_ASSERT(f->live[f->nlive - 1u].sample_index > 65536u);
+    WR_ASSERT(f->live[f->nlive - 1u].sample_index > 65536u);
 
     /*
      * ⚠ §8.3's SPLIT.  `a1` takes two u16be and §7.1 requires `first < last`,
@@ -3804,14 +3804,14 @@ HM_TEST(a_window_across_the_index_wrap_is_issued_as_two_asks_and_merged)
      */
     req = hist_request(f, 65400u, 65700u);
     writes_before = f->nwritten;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /* The near half, re-wrapped to u16 on the way out (§7.4). */
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
     at = last_a1(f);
-    HM_ASSERT_EQ(a1_first(f, at), 65400u);
-    HM_ASSERT_EQ(a1_last(f, at), 65535u);
+    WR_ASSERT_EQ(a1_first(f, at), 65400u);
+    WR_ASSERT_EQ(a1_last(f, at), 65535u);
     feed_history(f, 65400u, 65535u, 1u);
     drain(f);
 
@@ -3821,35 +3821,35 @@ HM_TEST(a_window_across_the_index_wrap_is_issued_as_two_asks_and_merged)
      * two pulls inside one live-frame gap exceed it and the tick unwrapper picks
      * the wrong wrap in silence.  A split window is two pulls like any other.
      */
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
     hist_live_frame(f, 72800u);
     drain(f);
 
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 2u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 2u);
     at = last_a1(f);
-    HM_ASSERT_EQ(a1_first(f, at), 0u);
-    HM_ASSERT_EQ(a1_last(f, at), 164u);
+    WR_ASSERT_EQ(a1_first(f, at), 0u);
+    WR_ASSERT_EQ(a1_last(f, at), 164u);
     feed_history(f, 65536u, 65700u, 1u);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
         /* ⚠ ONE BLOCK, ONE REQUEST.  Two asks on the wire and the caller sees
          * neither of them. */
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_COMPLETE);
-        HM_ASSERT_EQ(b->attempts, 2u);
-        HM_ASSERT_EQ(b->sample_count, 301u);
-        HM_ASSERT_EQ(b->samples[0].sample_index, 65400u);
-        HM_ASSERT_EQ(b->samples[b->sample_count - 1u].sample_index, 65700u);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_COMPLETE);
+        WR_ASSERT_EQ(b->attempts, 2u);
+        WR_ASSERT_EQ(b->sample_count, 301u);
+        WR_ASSERT_EQ(b->samples[0].sample_index, 65400u);
+        WR_ASSERT_EQ(b->samples[b->sample_count - 1u].sample_index, 65700u);
         /* ⚠ ASCENDING AND STRICTLY MONOTONIC ACROSS THE SEAM, with no
          * duplicate — the merge keys on the UNWRAPPED index, so the two halves
          * do not collide at 65535/0 the way the raw u16 would. */
         for (size_t i = 1; i < b->sample_count; ++i) {
-            HM_ASSERT(b->samples[i].sample_index > b->samples[i - 1u].sample_index);
+            WR_ASSERT(b->samples[i].sample_index > b->samples[i - 1u].sample_index);
         }
-        HM_ASSERT_NEAR(b->density, 1.0, 1e-9);
-        HM_ASSERT_NEAR(b->coverage_fraction, 1.0, 1e-9);
-        hm_history_block_release(b);
+        WR_ASSERT_NEAR(b->density, 1.0, 1e-9);
+        WR_ASSERT_NEAR(b->coverage_fraction, 1.0, 1e-9);
+        wr_history_block_release(b);
     }
 
     fake_close(f);
@@ -3866,29 +3866,29 @@ HM_TEST(a_window_across_the_index_wrap_is_issued_as_two_asks_and_merged)
     b = NULL;
     writes_before = f->nwritten;
     req = hist_request(f, 65600u, 65799u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
     feed_history(f, 65600u, 65799u, 1u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_COMPLETE);
-        HM_ASSERT_EQ(b->attempts, 1u);
-        HM_ASSERT_EQ(b->samples[0].sample_index, 65600u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_COMPLETE);
+        WR_ASSERT_EQ(b->attempts, 1u);
+        WR_ASSERT_EQ(b->samples[0].sample_index, 65600u);
+        wr_history_block_release(b);
     }
     fake_close(f);
 }
 
-HM_TEST(a_record_outside_the_requested_range_is_dropped_and_reported_once)
+WR_TEST(a_record_outside_the_requested_range_is_dropped_and_reported_once)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7199u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /*
@@ -3903,42 +3903,42 @@ HM_TEST(a_record_outside_the_requested_range_is_dropped_and_reported_once)
     feed_history_records(f, 7000u, 7199u, 1u);
     feed(f, k_mark_end, sizeof(k_mark_end));
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_COMPLETE);
-        HM_ASSERT_EQ(b->sample_count, 200u);
-        HM_ASSERT_EQ(b->samples[0].sample_index, 7000u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_COMPLETE);
+        WR_ASSERT_EQ(b->sample_count, 200u);
+        WR_ASSERT_EQ(b->samples[0].sample_index, 7000u);
+        wr_history_block_release(b);
     }
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_HISTORY_OUT_OF_RANGE), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_HISTORY_OUT_OF_RANGE), 1u);
     {
-        const hm_event *ev = find_event(f, HM_EV_WARNING);
+        const wr_event *ev = find_event(f, WR_EV_WARNING);
         for (size_t i = 0; i < f->nevents; ++i) {
-            if (f->events[i].type == (uint16_t)HM_EV_WARNING &&
-                f->events[i].u.warning.code == (uint16_t)HM_WARN_HISTORY_OUT_OF_RANGE) {
+            if (f->events[i].type == (uint16_t)WR_EV_WARNING &&
+                f->events[i].u.warning.code == (uint16_t)WR_WARN_HISTORY_OUT_OF_RANGE) {
                 ev = &f->events[i];
             }
         }
-        HM_ASSERT(ev != NULL);
+        WR_ASSERT(ev != NULL);
         if (ev != NULL) {
-            HM_ASSERT_EQ(ev->u.warning.detail_i32, 50);
+            WR_ASSERT_EQ(ev->u.warning.detail_i32, 50);
         }
     }
     fake_close(f);
 }
 
-HM_TEST(a_reply_that_stops_early_is_short_where_one_with_a_hole_in_it_is_holed)
+WR_TEST(a_reply_that_stops_early_is_short_where_one_with_a_hole_in_it_is_holed)
 {
     const uint32_t     first = 7000u;
     const uint32_t     last = 7399u;
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, first, last);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /*
@@ -3950,33 +3950,33 @@ HM_TEST(a_reply_that_stops_early_is_short_where_one_with_a_hole_in_it_is_holed)
      */
     feed_history(f, first, first + 199u, 1u);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_SHORT);
-        HM_ASSERT_EQ(b->sample_count, 200u);
-        HM_ASSERT_EQ(b->delivered_count, 1u);
-        HM_ASSERT_NEAR(b->coverage_fraction, 0.5, 1e-9);
-        HM_ASSERT_NEAR(b->density, 1.0, 1e-9);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_SHORT);
+        WR_ASSERT_EQ(b->sample_count, 200u);
+        WR_ASSERT_EQ(b->delivered_count, 1u);
+        WR_ASSERT_NEAR(b->coverage_fraction, 0.5, 1e-9);
+        WR_ASSERT_NEAR(b->density, 1.0, 1e-9);
+        wr_history_block_release(b);
     }
     /* The 200 indices that never arrived are what says something about depth. */
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_HISTORY_SHORT), 1u);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_HISTORY_HOLED), 0u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_HISTORY_SHORT), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_HISTORY_HOLED), 0u);
     fake_close(f);
 }
 
-HM_TEST(history_that_disagrees_with_live_is_counted_rather_than_quietly_preferred)
+WR_TEST(history_that_disagrees_with_live_is_counted_rather_than_quietly_preferred)
 {
     const uint32_t     first = 7000u;
     const uint32_t     last = 7399u;
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, first, last);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /*
@@ -3998,23 +3998,23 @@ HM_TEST(history_that_disagrees_with_live_is_counted_rather_than_quietly_preferre
     }
     feed(f, k_mark_end, sizeof(k_mark_end));
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT(b->live_overlap_samples > 0u);
-        HM_ASSERT_EQ(b->live_overlap_mismatches, b->live_overlap_samples);
+        WR_ASSERT(b->live_overlap_samples > 0u);
+        WR_ASSERT_EQ(b->live_overlap_mismatches, b->live_overlap_samples);
         /* ⚠ And the disagreement changes nothing about the data: no sample is
          * dropped, corrected or preferred.  The counters are the report. */
-        HM_ASSERT_EQ(b->sample_count, (size_t)(last - first + 1u));
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->sample_count, (size_t)(last - first + 1u));
+        wr_history_block_release(b);
     }
     fake_close(f);
 }
 
-HM_TEST(a_window_reaching_back_before_the_stream_says_never_recorded)
+WR_TEST(a_window_reaching_back_before_the_stream_says_never_recorded)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             not_recorded = 0u;
     size_t             fit_blind = 0u;
@@ -4022,37 +4022,37 @@ HM_TEST(a_window_reaching_back_before_the_stream_says_never_recorded)
 
     /* The stream's first sample is index 5000; ask from 4800. */
     req = hist_request(f, 4800u, 5100u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /* ⚠ The ask was CLAMPED: the device is asked for what it can have taken,
      * and the rest is reported rather than requested. */
     {
         size_t at = last_a1(f);
-        HM_ASSERT(at != SIZE_MAX);
-        HM_ASSERT_EQ(a1_first(f, at), 5000u);
-        HM_ASSERT_EQ(a1_last(f, at), 5100u);
+        WR_ASSERT(at != SIZE_MAX);
+        WR_ASSERT_EQ(a1_first(f, at), 5000u);
+        WR_ASSERT_EQ(a1_last(f, at), 5100u);
     }
     feed_history(f, 5000u, 5100u, 1u);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b == NULL) {
         fake_close(f);
         return;
     }
-    HM_ASSERT_EQ(b->sample_count, 101u);
+    WR_ASSERT_EQ(b->sample_count, 101u);
     for (size_t i = 0; i < b->gap_count; ++i) {
-        if (b->gaps[i].kind == (uint8_t)HM_GAP_NOT_RECORDED) {
+        if (b->gaps[i].kind == (uint8_t)WR_GAP_NOT_RECORDED) {
             not_recorded++;
-            HM_ASSERT_EQ(b->gaps[i].indices.first, 4800u);
-            HM_ASSERT_EQ(b->gaps[i].indices.last, 4999u);
+            WR_ASSERT_EQ(b->gaps[i].indices.first, 4800u);
+            WR_ASSERT_EQ(b->gaps[i].indices.last, 4999u);
         }
-        if (b->gaps[i].kind == (uint8_t)HM_GAP_FIT_BLIND) {
+        if (b->gaps[i].kind == (uint8_t)WR_GAP_FIT_BLIND) {
             fit_blind++;
-            /* ⚠ Undatable, and it says so with HM_TIME_UNKNOWN rather than an
+            /* ⚠ Undatable, and it says so with WR_TIME_UNKNOWN rather than an
              * extrapolated number that looks like a measurement. */
-            HM_ASSERT_EQ(b->gaps[i].span.start_us, HM_TIME_UNKNOWN);
+            WR_ASSERT_EQ(b->gaps[i].span.start_us, WR_TIME_UNKNOWN);
         }
     }
     /*
@@ -4061,9 +4061,9 @@ HM_TEST(a_window_reaching_back_before_the_stream_says_never_recorded)
      * is also outside what the fit ever observed, so both kinds cover it and
      * the stronger one wins for a consumer reading them.
      */
-    HM_ASSERT_EQ(not_recorded, 1u);
-    HM_ASSERT_EQ(fit_blind, 1u);
-    hm_history_block_release(b);
+    WR_ASSERT_EQ(not_recorded, 1u);
+    WR_ASSERT_EQ(fit_blind, 1u);
+    wr_history_block_release(b);
     fake_close(f);
 }
 
@@ -4081,24 +4081,24 @@ HM_TEST(a_window_reaching_back_before_the_stream_says_never_recorded)
  * FURTHER than we asked.
  *
  * ⚠ `depth_hi` only ever narrows, so the wrong claim would be permanent for the
- * stream: hm_history_resident_range() silently shrinks, and
- * HM_WARN_HISTORY_DEPTH_CONFLICT can fire over it.  §10.1 measured 4,182 records
+ * stream: wr_history_resident_range() silently shrinks, and
+ * WR_WARN_HISTORY_DEPTH_CONFLICT can fire over it.  §10.1 measured 4,182 records
  * with every one inside the requested range, so this needs the device to do
  * something never observed — and the consequence outlives the pull that caused
  * it.
  */
-HM_TEST(a_record_below_the_clamped_ask_does_not_invert_the_depth_bracket)
+WR_TEST(a_record_below_the_clamped_ask_does_not_invert_the_depth_bracket)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
-    hm_time_range      range;
+    wr_time_range      range;
     fake              *f = hist_open(400u, 5000u);
 
     /* The stream's first sample is index 5000; ask from 4800, so the ask is
      * clamped to 5000 while the gather still accepts from 4800. */
     req = hist_request(f, 4800u, 5100u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /* ⚠ And the device answers with one record BELOW what it was asked for. */
@@ -4107,11 +4107,11 @@ HM_TEST(a_record_below_the_clamped_ask_does_not_invert_the_depth_bracket)
     feed_history_records(f, 5000u, 5100u, 1u);
     feed(f, k_mark_end, sizeof(k_mark_end));
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->sample_count, 102u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->sample_count, 102u);
+        wr_history_block_release(b);
     }
 
     /* A live frame, so §6.1.1's re-anchored fit can date the buffer's head and
@@ -4123,29 +4123,29 @@ HM_TEST(a_record_below_the_clamped_ask_does_not_invert_the_depth_bracket)
      * to 4900 — but it must never report an UPPER bound narrower than that from
      * the same reply.  Under the underflow it recorded one, permanently.
      */
-    if (hm_history_resident_range(f->s, &range) == HM_OK) {
-        hm_time_us reached =
-            (hm_time_us)((double)(5000u + 401u * HIST_LIVE_STEP - 4900u) * 1251.0);
-        HM_ASSERT_MSG(range.end_us - range.start_us > reached / 2u,
+    if (wr_history_resident_range(f->s, &range) == WR_OK) {
+        wr_time_us reached =
+            (wr_time_us)((double)(5000u + 401u * HIST_LIVE_STEP - 4900u) * 1251.0);
+        WR_ASSERT_MSG(range.end_us - range.start_us > reached / 2u,
                       "a reply that reached FURTHER back than the ask must not "
                       "shrink the residency estimate");
     }
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_HISTORY_DEPTH_CONFLICT), 0u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_HISTORY_DEPTH_CONFLICT), 0u);
     fake_close(f);
 }
 
-HM_TEST(a_stop_during_a_pull_leaves_on_that_call_and_delivers_nothing_until_it_lands)
+WR_TEST(a_stop_during_a_pull_leaves_on_that_call_and_delivers_nothing_until_it_lands)
 {
     const uint8_t      stopped[] = { 0x83, 0x01 };
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             writes_before;
     size_t             live_before;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7399u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed(f, k_mark_start, sizeof(k_mark_start));
     feed_history_records(f, 7000u, 7099u, 1u);
@@ -4158,16 +4158,16 @@ HM_TEST(a_stop_during_a_pull_leaves_on_that_call_and_delivers_nothing_until_it_l
      * deliberately and will therefore hit first.
      */
     writes_before = f->nwritten;
-    HM_ASSERT_EQ(hm_session_stop_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_stop_stream(f->s), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(count_writes(f, 0x83, writes_before), 1u);
+    WR_ASSERT_EQ(count_writes(f, 0x83, writes_before), 1u);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_CANCELLED);
-        HM_ASSERT_EQ(b->sample_count, 100u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_CANCELLED);
+        WR_ASSERT_EQ(b->sample_count, 100u);
+        wr_history_block_release(b);
     }
 
     /*
@@ -4179,13 +4179,13 @@ HM_TEST(a_stop_during_a_pull_leaves_on_that_call_and_delivers_nothing_until_it_l
      */
     live_before = f->nlive;
     feed_history_records(f, 7100u, 7199u, 1u);
-    HM_ASSERT_EQ(f->nlive, live_before);
+    WR_ASSERT_EQ(f->nlive, live_before);
     feed(f, k_mark_end, sizeof(k_mark_end));
     feed_history_records(f, 7200u, 7220u, 1u);
-    HM_ASSERT_EQ(f->nlive, live_before);
+    WR_ASSERT_EQ(f->nlive, live_before);
 
     feed(f, stopped, sizeof(stopped));
-    HM_ASSERT_EQ(count_events(f, HM_EV_STREAM_STOPPED), 1u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_STREAM_STOPPED), 1u);
     fake_close(f);
 }
 
@@ -4194,63 +4194,63 @@ HM_TEST(a_stop_during_a_pull_leaves_on_that_call_and_delivers_nothing_until_it_l
  * WITH THE RIGHT REASON.
  *
  * implementation-review I6.  The fit is reset at start_stream() and never at a
- * stop, so HM_CLOCK_HAS_FIT survives one and reserve() sailed past every check.
+ * stop, so WR_CLOCK_HAS_FIT survives one and reserve() sailed past every check.
  * The request then sat QUEUED while history_service() returned silently at its
  * `stream != RUNNING` line on every pass — so history_issue(), the ONLY producer
- * of HM_HIST_NO_STREAM, was never reached, and the request waited out its whole
- * deadline to materialise HM_HIST_TIMED_OUT.
+ * of WR_HIST_NO_STREAM, was never reached, and the request waited out its whole
+ * deadline to materialise WR_HIST_TIMED_OUT.
  *
  * ⚠ Two separate harms, and the second is the worse one.  §8.4.1 exists to stop
  * a consumer's gather stalling on a request that has gone quiet — and the status
  * written into the capture was simply wrong about why it failed.
  */
-HM_TEST(reserving_after_the_stream_ended_says_so_now_rather_than_at_the_deadline)
+WR_TEST(reserving_after_the_stream_ended_says_so_now_rather_than_at_the_deadline)
 {
     const uint8_t      stopped[] = { 0x83, 0x01 };
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             writes_before;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7399u);
     /* Far enough out that waiting for it would be a visible stall. */
-    req.deadline_us = f->now + (hm_time_us)60 * 1000 * 1000;
+    req.deadline_us = f->now + (wr_time_us)60 * 1000 * 1000;
 
-    HM_ASSERT_EQ(hm_session_stop_stream(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_session_stop_stream(f->s), WR_OK);
     drain(f);
     feed(f, stopped, sizeof(stopped));
 
     writes_before = f->nwritten;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /* ⚠ Immediately, and before any radio traffic (AR C1). */
-    HM_ASSERT_EQ(hm_history_pending(f->s), 0u);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 0u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_pending(f->s), 0u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 0u);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_MSG(b->status == (uint8_t)HM_HIST_NO_STREAM,
+        WR_ASSERT_MSG(b->status == (uint8_t)WR_HIST_NO_STREAM,
                       "there was no stream, and that is what the capture must say");
-        HM_ASSERT_EQ(b->sample_count, 0u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->sample_count, 0u);
+        wr_history_block_release(b);
     }
     fake_close(f);
 }
 
-HM_TEST(a_stream_the_device_stopped_answers_its_reservations_at_once)
+WR_TEST(a_stream_the_device_stopped_answers_its_reservations_at_once)
 {
     const uint8_t      stopped[] = { 0x83, 0x01 };
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 7000u, 7399u);
     /* A deadline far enough out that timing out would be a visible stall. */
-    req.deadline_us = f->now + (hm_time_us)60 * 1000 * 1000;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    req.deadline_us = f->now + (wr_time_us)60 * 1000 * 1000;
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed(f, k_mark_start, sizeof(k_mark_start));
     feed_history_records(f, 7000u, 7099u, 1u);
@@ -4262,33 +4262,33 @@ HM_TEST(a_stream_the_device_stopped_answers_its_reservations_at_once)
      * for no information, so it is answered now, with what arrived.
      */
     feed(f, stopped, sizeof(stopped));
-    HM_ASSERT_EQ(hm_history_pending(f->s), 0u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_pending(f->s), 0u);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_NO_STREAM);
-        HM_ASSERT_EQ(b->sample_count, 100u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_NO_STREAM);
+        WR_ASSERT_EQ(b->sample_count, 100u);
+        wr_history_block_release(b);
     }
     fake_close(f);
 }
 
-HM_TEST(a_gather_waits_for_a_calibration_rather_than_interrupting_it)
+WR_TEST(a_gather_waits_for_a_calibration_rather_than_interrupting_it)
 {
-    hm_history_request req;
+    wr_history_request req;
     uint64_t           id = 0u;
     size_t             writes_before;
     fake              *f = hist_open(400u, 5000u);
 
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_OBSERVING_RAISE);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_OBSERVING_RAISE);
 
     /*
-     * ⚠ THE OTHER HALF OF THE R8 INTERLOCK.  Every hm_calibration_* call
-     * already refuses with HM_ERR_BUSY inside a bracket; this is the same rule
+     * ⚠ THE OTHER HALF OF THE R8 INTERLOCK.  Every wr_calibration_* call
+     * already refuses with WR_ERR_BUSY inside a bracket; this is the same rule
      * from the other side.  §8.2's device observes a CONTINUOUS RAISE between
      * the markers, and a bracket opened here would suspend live delivery for
      * seconds — aborting the attempt at the raise limit for a reason that has
@@ -4297,21 +4297,21 @@ HM_TEST(a_gather_waits_for_a_calibration_rather_than_interrupting_it)
      */
     writes_before = f->nwritten;
     req = hist_request(f, 7000u, 7199u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 0u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 0u);
 
     /* Live frames keep flowing through the routine, and none of them lets the
      * pull in early. */
     hist_live_frame(f, 17800u);
     hist_live_frame(f, 17832u);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 0u);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_OBSERVING_RAISE);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 0u);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_OBSERVING_RAISE);
 
     /* The routine ends; the next live frame picks the request up. */
-    HM_ASSERT_EQ(hm_calibration_abort(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_abort(f->s), WR_OK);
     hist_live_frame(f, 17864u);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
     fake_close(f);
 }
 
@@ -4331,52 +4331,52 @@ HM_TEST(a_gather_waits_for_a_calibration_rather_than_interrupting_it)
  * stamp_with() read `s->cal_state` at that moment, so all of them came back
  * labelled CALIBRATED: orientations in the mounting frame, marked as being in
  * the anatomical one, permanently and invisibly (sample.h).  The block's own
- * `hm_calibration_span` had it right all along, so the block contradicted
+ * `wr_calibration_span` had it right all along, so the block contradicted
  * itself — the summary said the span predates the transform and the samples
  * said they were calibrated.
  */
-HM_TEST(a_pull_held_behind_a_calibration_is_not_relabelled_by_it)
+WR_TEST(a_pull_held_behind_a_calibration_is_not_relabelled_by_it)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     uint32_t           index = 5000u + 400u * HIST_LIVE_STEP;
     fake              *f = hist_open(400u, 5000u);
 
     /* 1-2.  The window is behind us and uncalibrated; reserve it. */
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_UNCALIBRATED);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_UNCALIBRATED);
     req = hist_request(f, 7000u, 7199u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
 
     /* 3.  A whole routine, through to a passing presence measurement — the only
-     * route to HM_CAL_CALIBRATED (§8.2).  The request waits it out. */
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+     * route to WR_CAL_CALIBRATED (§8.2).  The request waits it out. */
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_confirm_raise(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_raise(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
     feed_cal_result(f);
-    HM_ASSERT_EQ(hm_calibration_confirm_reference_pose(f->s), HM_OK);
-    for (unsigned i = 0; i < HM_PRESENCE_MAX_SAMPLES; ++i) {
+    WR_ASSERT_EQ(wr_calibration_confirm_reference_pose(f->s), WR_OK);
+    for (unsigned i = 0; i < WR_PRESENCE_MAX_SAMPLES; ++i) {
         index += HIST_LIVE_STEP;
         f->now += 4000;
         feed_frame_split(f, (uint16_t)(index & 0xffffu), ticks_for(index), 0.5);
     }
-    HM_ASSERT_EQ(hm_session_calibration_state(f->s), HM_CAL_CALIBRATED);
+    WR_ASSERT_EQ(wr_session_calibration_state(f->s), WR_CAL_CALIBRATED);
 
     /* 4.  Now it goes out, and comes back. */
     drain(f);
     feed_history(f, 7000u, 7199u, 1u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b == NULL) {
         fake_close(f);
         return;
     }
-    HM_ASSERT_EQ(b->sample_count, 200u);
+    WR_ASSERT_EQ(b->sample_count, 200u);
 
     /*
      * ⚠ NOT CALIBRATED, which is the whole of the harm.  These orientations are
@@ -4390,28 +4390,28 @@ HM_TEST(a_pull_held_behind_a_calibration_is_not_relabelled_by_it)
      * say", which is the safe direction; sample.h's rule is that it is never a
      * hopeful CALIBRATED.
      */
-    HM_ASSERT(b->calibration.state_at_start != (uint8_t)HM_CAL_CALIBRATED);
+    WR_ASSERT(b->calibration.state_at_start != (uint8_t)WR_CAL_CALIBRATED);
 
     /* ⚠ AND THE BLOCK NO LONGER CONTRADICTS ITSELF.  Its summary and its samples
      * are resolved from the same transition, at the same instants, so they
      * cannot disagree — which is what implementation-review I3 caught them
      * doing. */
     for (size_t i = 0; i < b->sample_count; ++i) {
-        HM_ASSERT_MSG(b->samples[i].calibration != (uint8_t)HM_CAL_CALIBRATED,
+        WR_ASSERT_MSG(b->samples[i].calibration != (uint8_t)WR_CAL_CALIBRATED,
                       "a history sample carries the state at CAPTURE, never the "
                       "state at materialisation");
-        HM_ASSERT_EQ(b->samples[i].calibration, b->calibration.state_at_start);
+        WR_ASSERT_EQ(b->samples[i].calibration, b->calibration.state_at_start);
         /* No sample ever carries LOST, whatever else changes (sample.h). */
-        HM_ASSERT(b->samples[i].calibration != (uint8_t)HM_CAL_LOST);
+        WR_ASSERT(b->samples[i].calibration != (uint8_t)WR_CAL_LOST);
     }
-    hm_history_block_release(b);
+    wr_history_block_release(b);
 
     /* ⚠ And the live path is unaffected: a frame arriving NOW was captured now,
      * and the transform really is in force for it. */
     index += HIST_LIVE_STEP;
     f->now += 4000;
     feed_frame(f, (uint16_t)(index & 0xffffu), ticks_for(index), 0);
-    HM_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)HM_CAL_CALIBRATED);
+    WR_ASSERT_EQ(f->live[f->nlive - 1u].calibration, (uint8_t)WR_CAL_CALIBRATED);
     fake_close(f);
 }
 
@@ -4419,17 +4419,17 @@ HM_TEST(a_pull_held_behind_a_calibration_is_not_relabelled_by_it)
  * ⚠ AND THE INTERLOCK REACHES A REQUEST WHOSE BRACKET IS ALREADY CLOSED, which
  * is the half that is easy to miss.  Between two attempts — a refill, or the far
  * side of §8.3's wrap split — the request is still "in flight" but `bracket_open`
- * is false, so `cal_guard()` lets `hm_calibration_begin()` through.  If the next
+ * is false, so `cal_guard()` lets `wr_calibration_begin()` through.  If the next
  * attempt then went out, it would open a bracket in the MIDDLE of the routine:
  * live delivery suspended (§10.1) while §8.2's device is watching for a
  * continuous raise, and the attempt aborted at the raise limit for a reason that
  * has nothing to do with calibration, with a user standing there holding their
  * arm out.
  */
-HM_TEST(a_second_attempt_waits_for_a_calibration_the_same_way_a_first_one_does)
+WR_TEST(a_second_attempt_waits_for_a_calibration_the_same_way_a_first_one_does)
 {
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     size_t             writes_before;
     fake              *f = hist_open(400u, 60000u);
@@ -4437,36 +4437,36 @@ HM_TEST(a_second_attempt_waits_for_a_calibration_the_same_way_a_first_one_does)
     /* A window across the wrap: two asks, and the second is the one at risk. */
     req = hist_request(f, 65400u, 65700u);
     writes_before = f->nwritten;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
     feed_history(f, 65400u, 65535u, 1u);
     drain(f);
 
     /* The bracket has closed, so a routine is allowed to start. */
-    HM_ASSERT_EQ(hm_calibration_begin(f->s), HM_OK);
-    HM_ASSERT_EQ(hm_calibration_confirm_horizontal(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_begin(f->s), WR_OK);
+    WR_ASSERT_EQ(wr_calibration_confirm_horizontal(f->s), WR_OK);
     drain(f);
     feed(f, k_cal_ack, sizeof(k_cal_ack));
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_OBSERVING_RAISE);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_OBSERVING_RAISE);
 
     /* Live frames keep flowing, and none of them lets the far half out. */
     hist_live_frame(f, 72800u);
     hist_live_frame(f, 72832u);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
-    HM_ASSERT_EQ(hm_calibration_current_phase(f->s), HM_CALP_OBSERVING_RAISE);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 1u);
+    WR_ASSERT_EQ(wr_calibration_current_phase(f->s), WR_CALP_OBSERVING_RAISE);
 
     /* The routine ends; the next live frame picks the far half up. */
-    HM_ASSERT_EQ(hm_calibration_abort(f->s), HM_OK);
+    WR_ASSERT_EQ(wr_calibration_abort(f->s), WR_OK);
     hist_live_frame(f, 72864u);
-    HM_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 2u);
+    WR_ASSERT_EQ(count_writes(f, 0xa1, writes_before), 2u);
     feed_history(f, 65536u, 65700u, 1u);
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_COMPLETE);
-        HM_ASSERT_EQ(b->sample_count, 301u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_COMPLETE);
+        WR_ASSERT_EQ(b->sample_count, 301u);
+        wr_history_block_release(b);
     }
     fake_close(f);
 }
@@ -4478,16 +4478,16 @@ HM_TEST(a_second_attempt_waits_for_a_calibration_the_same_way_a_first_one_does)
  * these tests are about what the SESSION learned, not about the block. */
 static void hist_pull(fake *f, uint32_t first, uint32_t last, uint32_t step)
 {
-    hm_history_request req = hist_request(f, first, last);
-    hm_history_block  *b = NULL;
+    wr_history_request req = hist_request(f, first, last);
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
 
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed_history(f, first, last, step);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
     if (b != NULL) {
-        hm_history_block_release(b);
+        wr_history_block_release(b);
     }
 }
 
@@ -4498,26 +4498,26 @@ static void hist_pull(fake *f, uint32_t first, uint32_t last, uint32_t step)
  * §8.5 as drafted said the lower bound comes from a span that came back
  * COMPLETE.  §7.3 was then rewritten from hardware, and it makes every reply
  * HOLED — the buffer is motion-adaptive, so a still wrist returns an even
- * one-in-eight.  Replaying `swings.hmwire` through this gather produced six
- * blocks and ZERO HM_HIST_COMPLETE.  A rule keyed on the status would therefore
+ * one-in-eight.  Replaying `swings.wrwire` through this gather produced six
+ * blocks and ZERO WR_HIST_COMPLETE.  A rule keyed on the status would therefore
  * learn NOTHING on a real device and leave both queries reporting
- * HM_HISTORY_DEPTH_SEED_US — a figure measured once, on somebody else's session
+ * WR_HISTORY_DEPTH_SEED_US — a figure measured once, on somebody else's session
  * — dressed as a measurement of this connection.
  *
  * So the evidence is the OLD END OF THE DELIVERED SET, judged by §7.3's step-8
  * floor.  This reply is holed from end to end at that floor, is the shape a
  * still wrist actually produces, and it MUST move the bracket.
  */
-HM_TEST(a_reply_holed_at_the_hundred_hertz_floor_still_measures_the_depth)
+WR_TEST(a_reply_holed_at_the_hundred_hertz_floor_still_measures_the_depth)
 {
-    hm_time_range range;
-    hm_time_range before;
+    wr_time_range range;
+    wr_time_range before;
     fake         *f = hist_open(400u, 5000u);
 
     /* Nothing measured yet: the seed, and a status that says so. */
-    HM_ASSERT_EQ(hm_history_resident_range(f->s, &before), HM_PENDING);
+    WR_ASSERT_EQ(wr_history_resident_range(f->s, &before), WR_PENDING);
 
-    /* ⚠ Step 8 end to end — HM_HIST_HOLED, never HM_HIST_COMPLETE, and the
+    /* ⚠ Step 8 end to end — WR_HIST_HOLED, never WR_HIST_COMPLETE, and the
      * §7.3 shape of a pull over a still wrist. */
     hist_pull(f, 17000u, 17400u, 8u);
 
@@ -4529,10 +4529,10 @@ HM_TEST(a_reply_holed_at_the_hundred_hertz_floor_still_measures_the_depth)
      * host time.  Refusing for those few tens of milliseconds is right;
      * extrapolating through a stall of unknown width is what §6.1.1 forbids.
      */
-    HM_ASSERT_EQ(hm_history_resident_range(f->s, &range), HM_ERR_NO_FIT);
+    WR_ASSERT_EQ(wr_history_resident_range(f->s, &range), WR_ERR_NO_FIT);
     hist_live_frame(f, 17800u);
 
-    HM_ASSERT_EQ(hm_history_resident_range(f->s, &range), HM_OK);
+    WR_ASSERT_EQ(wr_history_resident_range(f->s, &range), WR_OK);
     /*
      * The device served back to index 17000 from a head of 17768, so the
      * verified reach-back is 768 indices ≈ 0.96 s at ≈799.2 Hz.  ⚠ Measured in
@@ -4540,22 +4540,22 @@ HM_TEST(a_reply_holed_at_the_hundred_hertz_floor_still_measures_the_depth)
      * internal rate whatever the wrist is doing (§6.5), where a bulk reply's
      * arrival times say only how fast the radio drained.
      */
-    HM_ASSERT_NEAR((double)(range.end_us - range.start_us), 768.0 * 1e6 / 799.2, 40000.0);
+    WR_ASSERT_NEAR((double)(range.end_us - range.start_us), 768.0 * 1e6 / 799.2, 40000.0);
 
     /* ⚠ And it under-claims on purpose: what was verified, not the seed. */
-    HM_ASSERT(range.end_us - range.start_us < HM_HISTORY_DEPTH_SEED_US);
+    WR_ASSERT(range.end_us - range.start_us < WR_HISTORY_DEPTH_SEED_US);
 
     /* The bool answers from the measurement now, both ways. */
-    HM_ASSERT(hm_history_coverage_available(f->s, range.end_us - 500000, range.end_us));
-    HM_ASSERT(!hm_history_coverage_available(f->s, range.end_us - 5000000, range.end_us));
+    WR_ASSERT(wr_history_coverage_available(f->s, range.end_us - 500000, range.end_us));
+    WR_ASSERT(!wr_history_coverage_available(f->s, range.end_us - 5000000, range.end_us));
     fake_close(f);
 }
 
-HM_TEST(a_reply_that_never_reached_its_old_end_caps_the_bracket_from_above)
+WR_TEST(a_reply_that_never_reached_its_old_end_caps_the_bracket_from_above)
 {
-    hm_time_range range;
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_time_range range;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
@@ -4565,21 +4565,21 @@ HM_TEST(a_reply_that_never_reached_its_old_end_caps_the_bracket_from_above)
      * motion.  The buffer did not reach that far.
      */
     req = hist_request(f, 17000u, 17400u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed_history(f, 17100u, 17400u, 1u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_SHORT);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_SHORT);
+        wr_history_block_release(b);
     }
     hist_live_frame(f, 17800u); /* §6.1.1: the re-anchored fit needs one */
 
-    HM_ASSERT_EQ(hm_history_resident_range(f->s, &range), HM_OK);
+    WR_ASSERT_EQ(wr_history_resident_range(f->s, &range), WR_OK);
     /* The lower bound is what ARRIVED — 17768 back to 17100, 668 indices — and
      * the upper bound sits above it at 768.  The claim is the lower one. */
-    HM_ASSERT_NEAR((double)(range.end_us - range.start_us), 668.0 * 1e6 / 799.2, 40000.0);
-    HM_ASSERT(!hm_history_coverage_available(f->s, range.start_us - 1, range.end_us));
+    WR_ASSERT_NEAR((double)(range.end_us - range.start_us), 668.0 * 1e6 / 799.2, 40000.0);
+    WR_ASSERT(!wr_history_coverage_available(f->s, range.start_us - 1, range.end_us));
     fake_close(f);
 }
 
@@ -4589,32 +4589,32 @@ HM_TEST(a_reply_that_never_reached_its_old_end_caps_the_bracket_from_above)
  * would shrink the bracket every time a consumer cancelled or a deadline
  * expired — a measurement that decays with use is worse than none.
  */
-HM_TEST(a_pull_that_delivered_nothing_teaches_the_bracket_nothing)
+WR_TEST(a_pull_that_delivered_nothing_teaches_the_bracket_nothing)
 {
-    hm_time_range      range;
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_time_range      range;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
     req = hist_request(f, 17000u, 17400u);
     req.deadline_us = f->now + 1000000;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed(f, k_mark_start, sizeof(k_mark_start)); /* accepted, and then silence */
 
     f->now += 2000000;
-    hm_session_tick(f->s, f->now);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
+    wr_session_tick(f->s, f->now);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_TIMED_OUT);
-        HM_ASSERT_EQ(b->sample_count, 0u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_TIMED_OUT);
+        WR_ASSERT_EQ(b->sample_count, 0u);
+        wr_history_block_release(b);
     }
 
     /* Still the seed, and still saying so. */
-    HM_ASSERT_EQ(hm_history_resident_range(f->s, &range), HM_PENDING);
-    HM_ASSERT(!hm_history_coverage_available(f->s, range.start_us, range.end_us));
+    WR_ASSERT_EQ(wr_history_resident_range(f->s, &range), WR_PENDING);
+    WR_ASSERT(!wr_history_coverage_available(f->s, range.start_us, range.end_us));
     fake_close(f);
 }
 
@@ -4631,11 +4631,11 @@ HM_TEST(a_pull_that_delivered_nothing_teaches_the_bracket_nothing)
  * data.  ⚠ Fixed duration or fixed sample count (§7.3) is the open question
  * this is the answer channel for.
  */
-HM_TEST(a_depth_bracket_that_contradicts_itself_says_so_and_takes_the_narrow_claim)
+WR_TEST(a_depth_bracket_that_contradicts_itself_says_so_and_takes_the_narrow_claim)
 {
-    hm_time_range      range;
-    hm_history_request req;
-    hm_history_block  *b = NULL;
+    wr_time_range      range;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
@@ -4653,22 +4653,22 @@ HM_TEST(a_depth_bracket_that_contradicts_itself_says_so_and_takes_the_narrow_cla
      * twenty-five times §7.3's floor.  The buffer failed at ~1.4 s, which is
      * LESS than the 2.2 s it served a moment ago. */
     req = hist_request(f, 17900u, 18400u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed_history(f, 18100u, 18400u, 1u);
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
     if (b != NULL) {
-        hm_history_block_release(b);
+        wr_history_block_release(b);
     }
     drain(f);
 
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_HISTORY_DEPTH_CONFLICT), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_HISTORY_DEPTH_CONFLICT), 1u);
 
     hist_live_frame(f, 19100u);
-    HM_ASSERT_EQ(hm_history_resident_range(f->s, &range), HM_OK);
+    WR_ASSERT_EQ(wr_history_resident_range(f->s, &range), WR_OK);
     /* ⚠ The NARROW claim wins.  Keeping the wider one would be claiming
      * residency the device has already refused once. */
-    HM_ASSERT(range.end_us - range.start_us < 2000000);
+    WR_ASSERT(range.end_us - range.start_us < 2000000);
 
     /* ⚠ And once per stream.  A warning that repeats every pull is one that
      * stops being read, and the event ring is drop-oldest. */
@@ -4676,16 +4676,16 @@ HM_TEST(a_depth_bracket_that_contradicts_itself_says_so_and_takes_the_narrow_cla
         hist_live_frame(f, 19200u + i * 32u);
     }
     req = hist_request(f, 19300u, 19800u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed_history(f, 19600u, 19800u, 1u);
     b = NULL;
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
     if (b != NULL) {
-        hm_history_block_release(b);
+        wr_history_block_release(b);
     }
     drain(f);
-    HM_ASSERT_EQ(count_warnings(f, HM_WARN_HISTORY_DEPTH_CONFLICT), 1u);
+    WR_ASSERT_EQ(count_warnings(f, WR_WARN_HISTORY_DEPTH_CONFLICT), 1u);
     fake_close(f);
 }
 
@@ -4696,56 +4696,56 @@ HM_TEST(a_depth_bracket_that_contradicts_itself_says_so_and_takes_the_narrow_cla
  * This is the one shape where the bracket has a ceiling and no floor, and the
  * two halves of the answer pull in opposite directions: the WIDTH narrows,
  * because the device has demonstrably refused that span, while the STATUS stays
- * HM_PENDING, because nothing has been served and no residency has been
- * verified.  Reporting HM_OK here would be the seed's failure mode inverted —
+ * WR_PENDING, because nothing has been served and no residency has been
+ * verified.  Reporting WR_OK here would be the seed's failure mode inverted —
  * an upper bound presented as though it were a measurement of what is there.
  *
  * §7.2's code means seven different things, and this session's own state rules
  * out six (§11 of implementation-notes).  If that elimination is ever wrong the
  * error is in the safe direction: the library claims LESS residency than it has.
  */
-HM_TEST(a_refused_range_lowers_the_ceiling_without_claiming_a_measurement)
+WR_TEST(a_refused_range_lowers_the_ceiling_without_claiming_a_measurement)
 {
     const uint8_t      device_error[] = { 0xd0, 0x03 };
-    hm_history_request req;
-    hm_history_block  *b = NULL;
-    hm_time_range      before;
-    hm_time_range      after;
+    wr_history_request req;
+    wr_history_block  *b = NULL;
+    wr_time_range      before;
+    wr_time_range      after;
     uint64_t           id = 0u;
     fake              *f = hist_open(400u, 5000u);
 
     /* Nothing measured: the seed, and a status that says so. */
-    HM_ASSERT_EQ(hm_history_resident_range(f->s, &before), HM_PENDING);
-    HM_ASSERT(before.end_us - before.start_us > 5000000);
+    WR_ASSERT_EQ(wr_history_resident_range(f->s, &before), WR_PENDING);
+    WR_ASSERT(before.end_us - before.start_us > 5000000);
 
     req = hist_request(f, 17000u, 17400u);
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &id), WR_OK);
     drain(f);
     feed(f, k_mark_end, sizeof(k_mark_end)); /* §7.2's LEADING end marker */
     feed(f, device_error, sizeof(device_error));
 
-    HM_ASSERT_EQ(hm_history_collect(f->s, id, &b), HM_OK);
-    HM_ASSERT(b != NULL);
+    WR_ASSERT_EQ(wr_history_collect(f->s, id, &b), WR_OK);
+    WR_ASSERT(b != NULL);
     if (b != NULL) {
-        HM_ASSERT_EQ(b->status, (uint8_t)HM_HIST_EVICTED);
-        HM_ASSERT_EQ(b->sample_count, 0u);
-        hm_history_block_release(b);
+        WR_ASSERT_EQ(b->status, (uint8_t)WR_HIST_EVICTED);
+        WR_ASSERT_EQ(b->sample_count, 0u);
+        wr_history_block_release(b);
     }
 
     /*
      * ⚠ No bracket ever opened, so the fit did NOT re-anchor — §6.1.1's usual
      * "wait for a live frame" does not apply to a pull the device refused.
      */
-    HM_ASSERT_EQ(hm_history_resident_range(f->s, &after), HM_PENDING);
+    WR_ASSERT_EQ(wr_history_resident_range(f->s, &after), WR_PENDING);
 
     /* The ceiling came down: the device refused 768 indices back from a head of
      * 17,768, about 0.96 s, so the estimate can no longer be the 7.5 s seed. */
-    HM_ASSERT(after.end_us - after.start_us < before.end_us - before.start_us);
-    HM_ASSERT_NEAR((double)(after.end_us - after.start_us), 768.0 * 1e6 / 799.2, 40000.0);
+    WR_ASSERT(after.end_us - after.start_us < before.end_us - before.start_us);
+    WR_ASSERT_NEAR((double)(after.end_us - after.start_us), 768.0 * 1e6 / 799.2, 40000.0);
 
     /* ⚠ And still false, because still nothing has been SERVED.  An upper bound
      * is not a reason to skip a check; it is a reason to expect less. */
-    HM_ASSERT(!hm_history_coverage_available(f->s, after.start_us, after.end_us));
+    WR_ASSERT(!wr_history_coverage_available(f->s, after.start_us, after.end_us));
     fake_close(f);
 }
 
@@ -4756,14 +4756,14 @@ HM_TEST(a_refused_range_lowers_the_ceiling_without_claiming_a_measurement)
  * comes.  The data was there; nobody asked in time.  Returning a holed set for
  * it with nothing anywhere saying why is the failure this warns about.
  */
-HM_TEST(a_queued_request_that_may_not_survive_its_wait_says_so_before_it_runs)
+WR_TEST(a_queued_request_that_may_not_survive_its_wait_says_so_before_it_runs)
 {
-    hm_history_request req;
+    wr_history_request req;
     uint64_t           first_id = 0u;
     uint64_t           second_id = 0u;
-    const hm_event    *ev;
+    const wr_event    *ev;
     fake              *f = hist_open(400u, 5000u);
-    hm_time_us         t0 = f->now;
+    wr_time_us         t0 = f->now;
 
     /* Ahead in the queue: three seconds wide, and its window has not closed —
      * so it cannot even start yet, let alone finish. */
@@ -4771,7 +4771,7 @@ HM_TEST(a_queued_request_that_may_not_survive_its_wait_says_so_before_it_runs)
     req.window.start_us = t0 - 1000000;
     req.window.end_us = t0 + 2000000;
     req.deadline_us = t0 + 60000000;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &first_id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &first_id), WR_OK);
 
     /* Behind it: a window whose oldest sample is already five seconds old.  Its
      * turn is estimated at t0 + 5 s — the leader's window close at t0 + 2 s plus
@@ -4781,19 +4781,19 @@ HM_TEST(a_queued_request_that_may_not_survive_its_wait_says_so_before_it_runs)
     req.window.start_us = t0 - 5000000;
     req.window.end_us = t0 + 1000000;
     req.deadline_us = t0 + 60000000;
-    HM_ASSERT_EQ(hm_history_reserve(f->s, &req, &second_id), HM_OK);
+    WR_ASSERT_EQ(wr_history_reserve(f->s, &req, &second_id), WR_OK);
     drain(f);
 
-    HM_ASSERT_EQ(count_events(f, HM_EV_HISTORY_EVICTION_RISK), 1u);
-    ev = find_event(f, HM_EV_HISTORY_EVICTION_RISK);
-    HM_ASSERT(ev != NULL);
+    WR_ASSERT_EQ(count_events(f, WR_EV_HISTORY_EVICTION_RISK), 1u);
+    ev = find_event(f, WR_EV_HISTORY_EVICTION_RISK);
+    WR_ASSERT(ev != NULL);
     if (ev != NULL) {
-        HM_ASSERT_EQ(ev->u.history_eviction_risk.request_id, second_id);
+        WR_ASSERT_EQ(ev->u.history_eviction_risk.request_id, second_id);
         /* ⚠ BOTH FIGURES TRAVEL TOGETHER.  A margin with no wait beside it
          * cannot be acted on, which is §8.6's whole shape. */
-        HM_ASSERT_NEAR((double)ev->u.history_eviction_risk.estimated_eviction_in_us, 2500000.0,
+        WR_ASSERT_NEAR((double)ev->u.history_eviction_risk.estimated_eviction_in_us, 2500000.0,
                        1000.0);
-        HM_ASSERT(ev->u.history_eviction_risk.queued_for_us >= 0);
+        WR_ASSERT(ev->u.history_eviction_risk.queued_for_us >= 0);
     }
 
     /* ⚠ Once per request.  The risk does not become newer by being restated,
@@ -4801,12 +4801,12 @@ HM_TEST(a_queued_request_that_may_not_survive_its_wait_says_so_before_it_runs)
      * everything else that happened while the queue drained. */
     hist_live_frame(f, 17800u);
     hist_live_frame(f, 17832u);
-    HM_ASSERT_EQ(count_events(f, HM_EV_HISTORY_EVICTION_RISK), 1u);
+    WR_ASSERT_EQ(count_events(f, WR_EV_HISTORY_EVICTION_RISK), 1u);
 
     /* ⚠ AND IT CANCELS NOTHING.  The estimate rests on a depth measured only once, so
      * acting on it would be acting on an order of magnitude — the request stays
      * exactly where it was, in the queue, in reservation order. */
-    HM_ASSERT_EQ(hm_history_pending(f->s), 2u);
+    WR_ASSERT_EQ(wr_history_pending(f->s), 2u);
 
     /*
      * ⚠ AND THE ROW IT ADDED OBEYS THE TABLE'S ONE RULE (implementation-notes
@@ -4817,21 +4817,21 @@ HM_TEST(a_queued_request_that_may_not_survive_its_wait_says_so_before_it_runs)
      * and never past it is what catches it.
      */
     {
-        hm_time_us previous = f->now;
+        wr_time_us previous = f->now;
         int        wakes = 0;
         for (;;) {
-            hm_time_us due = hm_session_next_due_us(f->s);
-            if (due == HM_TIME_NEVER || due > t0 + (hm_time_us)20 * 1000 * 1000) {
+            wr_time_us due = wr_session_next_due_us(f->s);
+            if (due == WR_TIME_NEVER || due > t0 + (wr_time_us)20 * 1000 * 1000) {
                 break;
             }
-            HM_ASSERT(due > previous);
+            WR_ASSERT(due > previous);
             previous = due;
             tick_at(f, due);
             wakes++;
-            HM_ASSERT(wakes < 500); /* it must terminate, not merely finish */
+            WR_ASSERT(wakes < 500); /* it must terminate, not merely finish */
         }
     }
     fake_close(f);
 }
 
-HM_TEST_MAIN()
+WR_TEST_MAIN()

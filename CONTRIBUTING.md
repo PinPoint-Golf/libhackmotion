@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (C) 2026 Mark Liversedge -->
-# Contributing to libhackmotion
+# Contributing to libwrist
 
 Read [`docs/design.md`](docs/design.md) first. It states not only what the
 library does but why each decision was made, and most review comments are
@@ -17,25 +17,25 @@ command uses. Avoiding the OTA service is explicitly not sufficient on its own
   the safe way to find it. It **cannot** prove the firmware accepts nothing else.
 - Treat undocumented command values as **unknown and possibly destructive**, not
   as unused (§12).
-- Do not add a `sendRaw()`. Every write goes through `hm_command_emit()` and the
-  allowlist in `src/hm_command.c`; `tests/test_command.c` sweeps all 256 byte
+- Do not add a `sendRaw()`. Every write goes through `wr_command_emit()` and the
+  allowlist in `src/wr_command.c`; `tests/test_command.c` sweeps all 256 byte
   values and will fail if that stops being true.
 - **The capture harness holds no second copy of the allowlist.**
-  `tools/hm_capture.py` asks the built library (`hmwire allowlist`) and refuses
+  `tools/wr_capture.py` asks the built library (`wrwire allowlist`) and refuses
   to run if it cannot. Do not give it a fallback: a second copy of a safety
   property is a second thing that can drift, and if the tool is unreachable the
   safe answer is to send nothing.
 - **A binding must not become a second way to reach the wire.** `python/` has no
   `send()`, and the reason is structural rather than a rule anyone has to keep:
-  the only bytes that exist came out of `hm_session_poll_writes()`, which the
+  the only bytes that exist came out of `wr_session_poll_writes()`, which the
   library composed against the allowlist. ⚠ A transport writes exactly those and
   synthesises nothing of its own — not a keepalive, not a bring-up step, not a
   "harmless" probe. Anything a transport needs to send, the session already
   emits; if it does not, that is a change to the session, in C, with a test.
 
 **Fuzzing the decoder is a different activity and is welcome.** Point a fuzzer at
-`hm_codec_decode()` under ASan and UBSan. That touches no hardware.
-`hm_replay_next()` is the other good target: it is where a file's own length
+`wr_codec_decode()` under ASan and UBSan. That touches no hardware.
+`wr_replay_next()` is the other good target: it is where a file's own length
 field meets a fixed-size buffer, and it refuses rather than clamping.
 
 ## Things the library must never grow
@@ -60,7 +60,7 @@ adding one will be declined regardless of how convenient it is.
 - C11, no compiler extensions. The build runs with `-Werror` and a wide warning
   set including `-Wconversion` and `-Wswitch-enum`; both are load-bearing.
 - `clang-format` with the repository's `.clang-format`.
-- Public API is `hm_` prefixed, snake_case, POD structs, opaque handles.
+- Public API is `wr_` prefixed, snake_case, POD structs, opaque handles.
 - A comment that repeats the code is noise. A comment that carries a *measured
   number and the section it came from* is the reason this library is safe to
   use — the specification's warnings belong next to the code that honours them.
@@ -79,20 +79,20 @@ cmake --build build/san -j4 && ctest --test-dir build/san
 
 ### Touching a public struct or enum
 
-⚠ **Three places, not one.** `python/hackmotion/_types.py` declares every public
-struct and enum a second time in ctypes, and `tools/hm_abi_table.c` is what
+⚠ **Three places, not one.** `python/wrist/_types.py` declares every public
+struct and enum a second time in ctypes, and `tools/wr_abi_table.c` is what
 proves the two agree. Change a header and you change all three, or
 `ctest -R python_abi` fails — which is the point.
 
-⚠ **`hm_abi_check()` is not enough on its own and was never meant to be.** It
+⚠ **`wr_abi_check()` is not enough on its own and was never meant to be.** It
 compares nine struct *sizes*; it says nothing about field offsets or enumerator
 values. The four layered checks and, more usefully, **what each of them cannot
-see** are documented at the top of `tools/hm_abi_table.c` and in design §4.6.1.
+see** are documented at the top of `tools/wr_abi_table.c` and in design §4.6.1.
 Read that before deciding a check is redundant.
 
 ### Python
 
-The binding is ctypes over `libhackmotion_ffi`, and its tests are ordinary ctest
+The binding is ctypes over `libwrist_ffi`, and its tests are ordinary ctest
 entries — nothing extra to install. `numpy` and `bleak` are optional and only
 `Samples.numpy()` and the transport touch them.
 

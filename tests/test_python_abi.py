@@ -3,25 +3,25 @@
 # Copyright (C) 2026 Mark Liversedge
 """test_python_abi.py — the ctypes layout against the compiler's.
 
-⚠ WHY THIS TEST EXISTS.  python/hackmotion/_types.py declares every public
+⚠ WHY THIS TEST EXISTS.  python/wrist/_types.py declares every public
 struct and enum a SECOND time.  That is the same shape of bug this project has
 had escape review three times: one side changes, the other is left stale, and
 the result is a plausible answer with no alarm.
 
-hm_abi_check() does not close it.  It compares NINE STRUCT SIZES and says
+wr_abi_check() does not close it.  It compares NINE STRUCT SIZES and says
 nothing about where the fields inside them sit, or about any enum at all.  A
 `skew_us` one slot out decodes every sample into plausible nonsense.
 
-So the binding is pinned against `hmwire abi`, which reads sizes, offsets and
+So the binding is pinned against `wrwire abi`, which reads sizes, offsets and
 enumerator values straight out of the compiler.  ⚠ It writes this test's
-authority down honestly: see tools/hm_abi_table.c for the four checks and the
+authority down honestly: see tools/wr_abi_table.c for the four checks and the
 one shape all four miss.
 
 This test paid for itself on the day it was written: the hand-written Python had
-hm_gap_kind's first two members THE WRONG WAY ROUND and four of eleven history
+wr_gap_kind's first two members THE WRONG WAY ROUND and four of eleven history
 statuses on the wrong numbers.  Both read as perfectly ordinary code.
 
-Usage: test_python_abi.py <path to the built hmwire> [<path to the .so>]
+Usage: test_python_abi.py <path to the built wrwire> [<path to the .so>]
 """
 
 import ctypes
@@ -52,33 +52,33 @@ def main() -> int:
         print(__doc__)
         return 2
 
-    hmwire = sys.argv[1]
+    wrwire = sys.argv[1]
     if len(sys.argv) > 2:
         # ⚠ The test must pin the layout of the object the binding will actually
         # load, not whichever build happens to be found first on this machine.
         import os
 
-        os.environ["HACKMOTION_LIBRARY"] = sys.argv[2]
+        os.environ["WRIST_LIBRARY"] = sys.argv[2]
 
-    out = subprocess.run([hmwire, "abi"], capture_output=True, text=True)
+    out = subprocess.run([wrwire, "abi"], capture_output=True, text=True)
     if out.returncode != 0:
         print(out.stderr, file=sys.stderr)
-        print("⚠ `hmwire abi` FAILED — the C table is out of step with the headers.")
+        print("⚠ `wrwire abi` FAILED — the C table is out of step with the headers.")
         print("  NOTHING WAS CHECKED.")
         return 1
     table = json.loads(out.stdout)
 
-    from hackmotion import _types as T
+    from wrist import _types as T
 
     # --- the loader's own guard ------------------------------------------
-    # ⚠ Importing at all runs hm_abi_check().  If that raised we would never
+    # ⚠ Importing at all runs wr_abi_check().  If that raised we would never
     # reach here, so this line is not the check — it is the record that the
     # check ran.
-    import hackmotion
+    import wrist
 
     check(
-        hackmotion.ABI_VERSION == table["abi_version"],
-        f"ABI version agrees ({hackmotion.ABI_VERSION})",
+        wrist.ABI_VERSION == table["abi_version"],
+        f"ABI version agrees ({wrist.ABI_VERSION})",
     )
 
     # ------------------------------------------------------------------
@@ -103,7 +103,7 @@ def main() -> int:
         if isinstance(obj, type)
         and issubclass(obj, (ctypes.Structure, ctypes.Union))
         and obj.__module__ == T.__name__
-        and not name.startswith("hm_event_payload")  # a member of hm_event, pinned via `u`
+        and not name.startswith("wr_event_payload")  # a member of wr_event, pinned via `u`
     }
     check(
         declared <= set(py_structs),
@@ -121,7 +121,7 @@ def main() -> int:
     mirrored = {c_name for c_name, _ in T.PINNED_ENUMS.values()}
 
     # ⚠ Reported, not asserted: an enum the C table dumps and Python does not
-    # mirror is a deliberate choice (hm_warning_code is rendered through the
+    # mirror is a deliberate choice (wr_warning_code is rendered through the
     # library's own name function rather than copied).  It is printed so the
     # choice stays visible rather than becoming an oversight nobody sees.
     unmirrored = sorted(set(c_enums) - mirrored)
@@ -134,7 +134,7 @@ def main() -> int:
     print(f"\n{checks - failures}/{checks} checks passed")
     if failures:
         print(
-            "\n⚠ The binding and the headers disagree.  Fix python/hackmotion/_types.py\n"
+            "\n⚠ The binding and the headers disagree.  Fix python/wrist/_types.py\n"
             "  — the compiler is right and the transcription is not."
         )
         return 1
@@ -150,7 +150,7 @@ def _check_struct(name, c_struct, py_struct):
     py_size = ctypes.sizeof(py_struct)
     # ⚠ THE SIZE IS THE CHECK THAT ACTUALLY CATCHES A FORGOTTEN FIELD, because a
     # field added to a header changes sizeof even when the C table's own tiling
-    # check cannot see it (tools/hm_abi_table.c).
+    # check cannot see it (tools/wr_abi_table.c).
     check(c_size == py_size, f"{name}: sizeof {py_size} == {c_size}")
 
     c_fields = {f["name"]: f for f in c_struct["fields"]}
@@ -185,7 +185,7 @@ def _check_enum(py_enum, c_name, prefix, c_enums):
         c_members[enumerator[len(prefix):]] = value
 
     # ⚠ `__members__`, never iteration.  Iterating an IntFlag yields only the
-    # canonical single-bit members, so HM_CFG_NO_MAGNETOMETER — which covers two
+    # canonical single-bit members, so WR_CFG_NO_MAGNETOMETER — which covers two
     # bits, deliberately — would vanish from the comparison and read as agreement.
     py_members = {name: int(member.value) for name, member in py_enum.__members__.items()}
 

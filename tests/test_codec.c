@@ -7,49 +7,49 @@
  * the test names say which.  A failure should point at the paragraph it
  * contradicts.
  */
-#include "hm_test.h"
-#include "hm_wire.h"
-#include "fixtures/hm_fixtures.h"
+#include "wr_test.h"
+#include "wr_wire.h"
+#include "fixtures/wr_fixtures.h"
 
-#include "hm_codec.h"
-#include "hackmotion/quat.h"
-#include "hackmotion/event.h"
+#include "wr_codec.h"
+#include "wrist/quat.h"
+#include "wrist/event.h"
 
 /* §1: byte order is NOT uniform across this protocol; the stream is big-endian. */
-HM_TEST(codec_stream_fields_are_big_endian)
+WR_TEST(codec_stream_fields_are_big_endian)
 {
-    hm_decoded d;
-    hm_status st = hm_codec_decode(HM_FIX_FRAME_7E, sizeof(HM_FIX_FRAME_7E),
-                                   hm_stream_config_default(), &d);
-    HM_ASSERT_EQ(st, HM_OK);
-    HM_ASSERT_EQ(d.kind, HM_MSGK_FRAME);
-    HM_ASSERT_EQ(d.u.frame.count, 1);
-    HM_ASSERT_EQ(d.consumed, 47);
+    wr_decoded d;
+    wr_status st = wr_codec_decode(WR_FIX_FRAME_7E, sizeof(WR_FIX_FRAME_7E),
+                                   wr_stream_config_default(), &d);
+    WR_ASSERT_EQ(st, WR_OK);
+    WR_ASSERT_EQ(d.kind, WR_MSGK_FRAME);
+    WR_ASSERT_EQ(d.u.frame.count, 1);
+    WR_ASSERT_EQ(d.consumed, 47);
 
-    HM_ASSERT_EQ(d.u.frame.sample[0].sample_index_raw, 0x0123);
-    HM_ASSERT_EQ(d.u.frame.sample[0].lower_arm.q_world_to_body_raw[0], 16384);
-    HM_ASSERT_EQ(d.u.frame.sample[0].lower_arm.linear_accel_raw[0], 100);
-    HM_ASSERT_EQ(d.u.frame.sample[0].lower_arm.linear_accel_raw[1], -200);
-    HM_ASSERT_EQ(d.u.frame.sample[0].lower_arm.gyro_raw[0], 800);
-    HM_ASSERT_EQ(d.u.frame.sample[0].lower_arm.gyro_raw[2], -1600);
-    HM_ASSERT_EQ(d.u.frame.sample[0].lower_arm.ticks_raw, 0x1234);
-    HM_ASSERT_EQ(d.u.frame.sample[0].palm.ticks_raw, 0x126F);
+    WR_ASSERT_EQ(d.u.frame.sample[0].sample_index_raw, 0x0123);
+    WR_ASSERT_EQ(d.u.frame.sample[0].lower_arm.q_world_to_body_raw[0], 16384);
+    WR_ASSERT_EQ(d.u.frame.sample[0].lower_arm.linear_accel_raw[0], 100);
+    WR_ASSERT_EQ(d.u.frame.sample[0].lower_arm.linear_accel_raw[1], -200);
+    WR_ASSERT_EQ(d.u.frame.sample[0].lower_arm.gyro_raw[0], 800);
+    WR_ASSERT_EQ(d.u.frame.sample[0].lower_arm.gyro_raw[2], -1600);
+    WR_ASSERT_EQ(d.u.frame.sample[0].lower_arm.ticks_raw, 0x1234);
+    WR_ASSERT_EQ(d.u.frame.sample[0].palm.ticks_raw, 0x126F);
 }
 
 /* §6.4: quaternion /16384, accel × 0.0098 m/s², gyro /8 with config bit 6. */
-HM_TEST(codec_scales_match_section_6_4)
+WR_TEST(codec_scales_match_section_6_4)
 {
-    hm_decoded d;
-    const hm_unit_sample *arm;
-    (void)hm_codec_decode(HM_FIX_FRAME_7E, sizeof(HM_FIX_FRAME_7E),
-                          hm_stream_config_default(), &d);
+    wr_decoded d;
+    const wr_unit_sample *arm;
+    (void)wr_codec_decode(WR_FIX_FRAME_7E, sizeof(WR_FIX_FRAME_7E),
+                          wr_stream_config_default(), &d);
     arm = &d.u.frame.sample[0].lower_arm;
 
-    HM_ASSERT_NEAR(arm->q_world_to_body[0], 1.0f, 1e-6);
-    HM_ASSERT_NEAR(arm->linear_accel_mps2[0], 0.98f, 1e-5);
-    HM_ASSERT_NEAR(arm->linear_accel_mps2[1], -1.96f, 1e-5);
-    HM_ASSERT_NEAR(arm->gyro_dps[0], 100.0f, 1e-4);   /* 800 / 8 */
-    HM_ASSERT_NEAR(arm->gyro_dps[2], -200.0f, 1e-4);  /* -1600 / 8 */
+    WR_ASSERT_NEAR(arm->q_world_to_body[0], 1.0f, 1e-6);
+    WR_ASSERT_NEAR(arm->linear_accel_mps2[0], 0.98f, 1e-5);
+    WR_ASSERT_NEAR(arm->linear_accel_mps2[1], -1.96f, 1e-5);
+    WR_ASSERT_NEAR(arm->gyro_dps[0], 100.0f, 1e-4);   /* 800 / 8 */
+    WR_ASSERT_NEAR(arm->gyro_dps[2], -200.0f, 1e-4);  /* -1600 / 8 */
 }
 
 /*
@@ -57,66 +57,66 @@ HM_TEST(codec_scales_match_section_6_4)
  * wrong divisor is silently wrong — which is why api-request §2.3 insists the
  * raw counts and the configuration byte travel with the data.
  */
-HM_TEST(codec_gyro_divisor_follows_config_bit_6)
+WR_TEST(codec_gyro_divisor_follows_config_bit_6)
 {
-    hm_decoded d;
-    hm_stream_config cfg = hm_stream_config_nonstandard(0x3e, "test: bit 6 clear");
+    wr_decoded d;
+    wr_stream_config cfg = wr_stream_config_nonstandard(0x3e, "test: bit 6 clear");
 
     /* 0x3e keeps bit 5 (ticks) so the layout is unchanged; only the scale moves. */
-    (void)hm_codec_decode(HM_FIX_FRAME_7E, sizeof(HM_FIX_FRAME_7E), cfg, &d);
-    HM_ASSERT_EQ(hm_stream_config_gyro_divisor(cfg), 16);
-    HM_ASSERT_NEAR(d.u.frame.sample[0].lower_arm.gyro_dps[0], 50.0f, 1e-4);
-    HM_ASSERT_EQ(d.u.frame.sample[0].lower_arm.gyro_raw[0], 800); /* raw is unchanged */
-    HM_ASSERT(d.u.frame.sample[0].flags & HM_SAMPLE_NONSTANDARD_CONFIG);
+    (void)wr_codec_decode(WR_FIX_FRAME_7E, sizeof(WR_FIX_FRAME_7E), cfg, &d);
+    WR_ASSERT_EQ(wr_stream_config_gyro_divisor(cfg), 16);
+    WR_ASSERT_NEAR(d.u.frame.sample[0].lower_arm.gyro_dps[0], 50.0f, 1e-4);
+    WR_ASSERT_EQ(d.u.frame.sample[0].lower_arm.gyro_raw[0], 800); /* raw is unchanged */
+    WR_ASSERT(d.u.frame.sample[0].flags & WR_SAMPLE_NONSTANDARD_CONFIG);
 }
 
 /* ⚠ §6.2: bit 5 changes the BLOCK SIZE, not just the content. */
-HM_TEST(codec_config_bit_5_changes_the_wire_format)
+WR_TEST(codec_config_bit_5_changes_the_wire_format)
 {
-    hm_stream_config with = hm_stream_config_default();          /* 0x7e */
-    hm_stream_config without = hm_stream_config_nonstandard(0x5e, "test: 5e");
+    wr_stream_config with = wr_stream_config_default();          /* 0x7e */
+    wr_stream_config without = wr_stream_config_nonstandard(0x5e, "test: 5e");
 
-    HM_ASSERT_EQ(hm_stream_config_block_size(with), 22);
-    HM_ASSERT_EQ(hm_stream_config_record_size(with), 46);
-    HM_ASSERT(hm_stream_config_has_ticks(with));
+    WR_ASSERT_EQ(wr_stream_config_block_size(with), 22);
+    WR_ASSERT_EQ(wr_stream_config_record_size(with), 46);
+    WR_ASSERT(wr_stream_config_has_ticks(with));
 
-    HM_ASSERT_EQ(hm_stream_config_block_size(without), 20);
-    HM_ASSERT_EQ(hm_stream_config_record_size(without), 42);
-    HM_ASSERT(!hm_stream_config_has_ticks(without));
+    WR_ASSERT_EQ(wr_stream_config_block_size(without), 20);
+    WR_ASSERT_EQ(wr_stream_config_record_size(without), 42);
+    WR_ASSERT(!wr_stream_config_has_ticks(without));
 }
 
 /* §6.3: the FIRST block is the lower arm, the SECOND is the palm. */
-HM_TEST(codec_block_order_is_lower_arm_then_palm)
+WR_TEST(codec_block_order_is_lower_arm_then_palm)
 {
-    hm_decoded d;
-    (void)hm_codec_decode(HM_FIX_FRAME_7E, sizeof(HM_FIX_FRAME_7E),
-                          hm_stream_config_default(), &d);
+    wr_decoded d;
+    (void)wr_codec_decode(WR_FIX_FRAME_7E, sizeof(WR_FIX_FRAME_7E),
+                          wr_stream_config_default(), &d);
 
     /* The fixture gives the arm w=1 and the palm a 90° rotation; if the blocks
      * were swapped both of these would fail. */
-    HM_ASSERT_NEAR(d.u.frame.sample[0].lower_arm.q_world_to_body[0], 1.0f, 1e-6);
-    HM_ASSERT_NEAR(d.u.frame.sample[0].palm.q_world_to_body[0], 0.70709f, 1e-4);
-    HM_ASSERT_EQ(hm_sample_unit(&d.u.frame.sample[0], HM_UNIT_LOWER_ARM),
+    WR_ASSERT_NEAR(d.u.frame.sample[0].lower_arm.q_world_to_body[0], 1.0f, 1e-6);
+    WR_ASSERT_NEAR(d.u.frame.sample[0].palm.q_world_to_body[0], 0.70709f, 1e-4);
+    WR_ASSERT_EQ(wr_sample_unit(&d.u.frame.sample[0], WR_UNIT_LOWER_ARM),
                  &d.u.frame.sample[0].lower_arm);
-    HM_ASSERT_EQ(hm_sample_unit(&d.u.frame.sample[0], HM_UNIT_PALM),
+    WR_ASSERT_EQ(wr_sample_unit(&d.u.frame.sample[0], WR_UNIT_PALM),
                  &d.u.frame.sample[0].palm);
 }
 
 /* §6.3: a notification carries one OR two records — 47 or 93 bytes. */
-HM_TEST(codec_accepts_two_record_notifications)
+WR_TEST(codec_accepts_two_record_notifications)
 {
     uint8_t buf[128];
-    hm_wire_block a = hm_wire_identity_block(1000);
-    hm_wire_block b = hm_wire_identity_block(1059);
-    hm_decoded d;
-    size_t n = hm_wire_notification2(buf, 100, &a, &b, 108, &a, &b);
+    wr_wire_block a = wr_wire_identity_block(1000);
+    wr_wire_block b = wr_wire_identity_block(1059);
+    wr_decoded d;
+    size_t n = wr_wire_notification2(buf, 100, &a, &b, 108, &a, &b);
 
-    HM_ASSERT_EQ(n, 93);
-    HM_ASSERT_EQ(hm_codec_decode(buf, n, hm_stream_config_default(), &d), HM_OK);
-    HM_ASSERT_EQ(d.u.frame.count, 2);
-    HM_ASSERT_EQ(d.consumed, 93);
-    HM_ASSERT_EQ(d.u.frame.sample[0].sample_index_raw, 100);
-    HM_ASSERT_EQ(d.u.frame.sample[1].sample_index_raw, 108); /* the +8 100 Hz step */
+    WR_ASSERT_EQ(n, 93);
+    WR_ASSERT_EQ(wr_codec_decode(buf, n, wr_stream_config_default(), &d), WR_OK);
+    WR_ASSERT_EQ(d.u.frame.count, 2);
+    WR_ASSERT_EQ(d.consumed, 93);
+    WR_ASSERT_EQ(d.u.frame.sample[0].sample_index_raw, 100);
+    WR_ASSERT_EQ(d.u.frame.sample[1].sample_index_raw, 108); /* the +8 100 Hz step */
 }
 
 /*
@@ -128,23 +128,23 @@ HM_TEST(codec_accepts_two_record_notifications)
  * boundary would leave 46 bytes of a record in the buffer whose first byte is a
  * sample counter that can perfectly well be 0x90.
  */
-HM_TEST(codec_flags_a_misaligned_record_without_dropping_it)
+WR_TEST(codec_flags_a_misaligned_record_without_dropping_it)
 {
     uint8_t buf[128];
-    hm_wire_block a = hm_wire_identity_block(1000);
-    hm_decoded d;
-    size_t n = hm_wire_notification2(buf, 100, &a, &a, 108, &a, &a);
+    wr_wire_block a = wr_wire_identity_block(1000);
+    wr_decoded d;
+    size_t n = wr_wire_notification2(buf, 100, &a, &a, 108, &a, &a);
 
     /* Corrupt the second record's first quaternion component. */
     buf[1 + 46 + 2] = 0x00;
     buf[1 + 46 + 3] = 0x10;
 
-    HM_ASSERT_EQ(hm_codec_decode(buf, n, hm_stream_config_default(), &d), HM_OK);
-    HM_ASSERT_MSG(d.u.frame.count == 2, "the length says two records, so there are two");
-    HM_ASSERT_EQ(d.consumed, 93);
-    HM_ASSERT(d.warnings & (1u << HM_WARN_QUAT_NORM));
-    HM_ASSERT(d.u.frame.sample[1].flags & HM_SAMPLE_QUAT_NORM_SUSPECT);
-    HM_ASSERT(!(d.u.frame.sample[0].flags & HM_SAMPLE_QUAT_NORM_SUSPECT));
+    WR_ASSERT_EQ(wr_codec_decode(buf, n, wr_stream_config_default(), &d), WR_OK);
+    WR_ASSERT_MSG(d.u.frame.count == 2, "the length says two records, so there are two");
+    WR_ASSERT_EQ(d.consumed, 93);
+    WR_ASSERT(d.warnings & (1u << WR_WARN_QUAT_NORM));
+    WR_ASSERT(d.u.frame.sample[1].flags & WR_SAMPLE_QUAT_NORM_SUSPECT);
+    WR_ASSERT(!(d.u.frame.sample[0].flags & WR_SAMPLE_QUAT_NORM_SUSPECT));
 }
 
 /*
@@ -153,59 +153,59 @@ HM_TEST(codec_flags_a_misaligned_record_without_dropping_it)
  * field, no sequence number and no checksum, so nothing could resynchronise
  * after it — the only safe response is to be loud immediately.
  */
-HM_TEST(codec_warns_on_a_payload_that_is_not_a_whole_number_of_records)
+WR_TEST(codec_warns_on_a_payload_that_is_not_a_whole_number_of_records)
 {
     uint8_t buf[256];
-    hm_wire_block a = hm_wire_identity_block(1000);
-    hm_decoded d;
-    size_t n = hm_wire_notification1(buf, 100, &a, &a);
+    wr_wire_block a = wr_wire_identity_block(1000);
+    wr_decoded d;
+    size_t n = wr_wire_notification1(buf, 100, &a, &a);
 
     /* Simulate a coalescing transport: append a second notification. */
-    n += hm_wire_notification1(buf + n, 132, &a, &a);
-    HM_ASSERT_EQ(n, 94);
+    n += wr_wire_notification1(buf + n, 132, &a, &a);
+    WR_ASSERT_EQ(n, 94);
 
-    HM_ASSERT_EQ(hm_codec_decode(buf, n, hm_stream_config_default(), &d), HM_OK);
-    HM_ASSERT_MSG(d.warnings & (1u << HM_WARN_TRAILING_BYTES),
+    WR_ASSERT_EQ(wr_codec_decode(buf, n, wr_stream_config_default(), &d), WR_OK);
+    WR_ASSERT_MSG(d.warnings & (1u << WR_WARN_TRAILING_BYTES),
                   "a coalesced buffer must be reported, never absorbed");
 
     /* And a fixed-length message with anything after it says so too. */
     {
         uint8_t over[16];
-        memcpy(over, HM_FIX_VERSIONS, sizeof(HM_FIX_VERSIONS));
-        memset(over + sizeof(HM_FIX_VERSIONS), 0x00, 4);
-        HM_ASSERT_EQ(hm_codec_decode(over, sizeof(HM_FIX_VERSIONS) + 4,
-                                     hm_stream_config_default(), &d),
-                     HM_OK);
-        HM_ASSERT_EQ(d.kind, HM_MSGK_VERSIONS);
-        HM_ASSERT(d.warnings & (1u << HM_WARN_TRAILING_BYTES));
+        memcpy(over, WR_FIX_VERSIONS, sizeof(WR_FIX_VERSIONS));
+        memset(over + sizeof(WR_FIX_VERSIONS), 0x00, 4);
+        WR_ASSERT_EQ(wr_codec_decode(over, sizeof(WR_FIX_VERSIONS) + 4,
+                                     wr_stream_config_default(), &d),
+                     WR_OK);
+        WR_ASSERT_EQ(d.kind, WR_MSGK_VERSIONS);
+        WR_ASSERT(d.warnings & (1u << WR_WARN_TRAILING_BYTES));
     }
 }
 
 /* §6.3 says one or two records.  More is decoded and reported, not truncated. */
-HM_TEST(codec_reports_more_records_than_the_specification_describes)
+WR_TEST(codec_reports_more_records_than_the_specification_describes)
 {
     uint8_t buf[256];
-    hm_wire_block a = hm_wire_identity_block(1000);
-    hm_decoded d;
+    wr_wire_block a = wr_wire_identity_block(1000);
+    wr_decoded d;
     size_t o = 1;
     buf[0] = 0x90;
     for (uint16_t k = 0; k < 3u; ++k) {
-        o += hm_wire_write_record(buf + o, (uint16_t)(100 + 8 * k), &a, &a, 1);
+        o += wr_wire_write_record(buf + o, (uint16_t)(100 + 8 * k), &a, &a, 1);
     }
-    HM_ASSERT_EQ(o, 139);
+    WR_ASSERT_EQ(o, 139);
 
-    HM_ASSERT_EQ(hm_codec_decode(buf, o, hm_stream_config_default(), &d), HM_OK);
-    HM_ASSERT_EQ(d.u.frame.count, 3);
-    HM_ASSERT_EQ(d.u.frame.count_present, 3);
-    HM_ASSERT_EQ(d.consumed, o);
-    HM_ASSERT(d.warnings & (1u << HM_WARN_UNEXPECTED_RECORD_COUNT));
-    HM_ASSERT(!(d.warnings & (1u << HM_WARN_TRAILING_BYTES)));
+    WR_ASSERT_EQ(wr_codec_decode(buf, o, wr_stream_config_default(), &d), WR_OK);
+    WR_ASSERT_EQ(d.u.frame.count, 3);
+    WR_ASSERT_EQ(d.u.frame.count_present, 3);
+    WR_ASSERT_EQ(d.consumed, o);
+    WR_ASSERT(d.warnings & (1u << WR_WARN_UNEXPECTED_RECORD_COUNT));
+    WR_ASSERT(!(d.warnings & (1u << WR_WARN_TRAILING_BYTES)));
 }
 
 /*
  * ⚠⚠ AND ABOVE THE ARRAY'S OWN SIZE THE TRUNCATION MUST NOT BE SILENT.
  *
- * implementation-review I13.  hm_codec.h promises the oversized array exists "so
+ * implementation-review I13.  wr_codec.h promises the oversized array exists "so
  * that a firmware sending more is DECODED and reported rather than silently
  * truncated" — a promise a fixed array of four cannot keep for five.  It dropped
  * the extras AND computed `consumed` from the truncated count, so a 5-record
@@ -216,26 +216,26 @@ HM_TEST(codec_reports_more_records_than_the_specification_describes)
  * LENGTH says are there.  `consumed` follows the length, so the notification is
  * always fully accounted for.
  */
-HM_TEST(codec_says_how_many_records_it_dropped_rather_than_truncating_quietly)
+WR_TEST(codec_says_how_many_records_it_dropped_rather_than_truncating_quietly)
 {
     uint8_t buf[512];
-    hm_wire_block a = hm_wire_identity_block(1000);
-    hm_decoded d;
+    wr_wire_block a = wr_wire_identity_block(1000);
+    wr_decoded d;
     size_t o = 1;
     buf[0] = 0x90;
     for (uint16_t k = 0; k < 5u; ++k) {
-        o += hm_wire_write_record(buf + o, (uint16_t)(100 + 8 * k), &a, &a, 1);
+        o += wr_wire_write_record(buf + o, (uint16_t)(100 + 8 * k), &a, &a, 1);
     }
 
-    HM_ASSERT_EQ(hm_codec_decode(buf, o, hm_stream_config_default(), &d), HM_OK);
-    HM_ASSERT_EQ(d.u.frame.count, HM_CODEC_MAX_RECORDS);
-    HM_ASSERT_MSG(d.u.frame.count_present == 5u,
+    WR_ASSERT_EQ(wr_codec_decode(buf, o, wr_stream_config_default(), &d), WR_OK);
+    WR_ASSERT_EQ(d.u.frame.count, WR_CODEC_MAX_RECORDS);
+    WR_ASSERT_MSG(d.u.frame.count_present == 5u,
                   "the length says five, and that is what the notification held");
-    HM_ASSERT_MSG(d.consumed == o,
+    WR_ASSERT_MSG(d.consumed == o,
                   "every byte of the notification was interpreted, whatever the "
                   "array could hold");
-    HM_ASSERT(d.warnings & (1u << HM_WARN_UNEXPECTED_RECORD_COUNT));
-    HM_ASSERT(!(d.warnings & (1u << HM_WARN_TRAILING_BYTES)));
+    WR_ASSERT(d.warnings & (1u << WR_WARN_UNEXPECTED_RECORD_COUNT));
+    WR_ASSERT(!(d.warnings & (1u << WR_WARN_TRAILING_BYTES)));
 }
 
 /*
@@ -243,11 +243,11 @@ HM_TEST(codec_says_how_many_records_it_dropped_rather_than_truncating_quietly)
  * §6.4 measures |q| = 16384.7 ± 0.41 over 6,064 records, so a correct frame has
  * enormous margin and a shifted one has none.
  */
-HM_TEST(codec_norm_tolerance_catches_a_one_byte_shift)
+WR_TEST(codec_norm_tolerance_catches_a_one_byte_shift)
 {
     uint8_t buf[128];
-    hm_wire_block a = hm_wire_identity_block(1000);
-    hm_decoded d;
+    wr_wire_block a = wr_wire_identity_block(1000);
+    wr_decoded d;
     size_t n;
 
     /* A realistic, fully populated quaternion rather than the identity. */
@@ -255,21 +255,21 @@ HM_TEST(codec_norm_tolerance_catches_a_one_byte_shift)
     a.q[1] = 8192;
     a.q[2] = 0;
     a.q[3] = 0;
-    n = hm_wire_notification2(buf, 100, &a, &a, 108, &a, &a);
+    n = wr_wire_notification2(buf, 100, &a, &a, 108, &a, &a);
 
-    HM_ASSERT_EQ(hm_codec_decode(buf, n, hm_stream_config_default(), &d), HM_OK);
-    HM_ASSERT_MSG(!(d.warnings & (1u << HM_WARN_QUAT_NORM)),
+    WR_ASSERT_EQ(wr_codec_decode(buf, n, wr_stream_config_default(), &d), WR_OK);
+    WR_ASSERT_MSG(!(d.warnings & (1u << WR_WARN_QUAT_NORM)),
                   "a correctly located frame must never trip the check");
 
     /* Now decode the same bytes one byte late, as a stream framer would after a
      * mis-sized message.  This is the corruption the datagram contract removes. */
     {
-        hm_stream_config cfg = hm_stream_config_default();
-        HM_ASSERT_EQ(hm_codec_decode_record(buf + 2, n - 2, &cfg, &d.u.frame.sample[0]), HM_OK);
+        wr_stream_config cfg = wr_stream_config_default();
+        WR_ASSERT_EQ(wr_codec_decode_record(buf + 2, n - 2, &cfg, &d.u.frame.sample[0]), WR_OK);
     }
-    HM_ASSERT_MSG(d.u.frame.sample[0].flags & HM_SAMPLE_QUAT_NORM_SUSPECT,
+    WR_ASSERT_MSG(d.u.frame.sample[0].flags & WR_SAMPLE_QUAT_NORM_SUSPECT,
                   "a one-byte shift must be visible in the norm");
-    HM_ASSERT(HM_QUAT_NORM_TOLERANCE <= 64.0f);
+    WR_ASSERT(WR_QUAT_NORM_TOLERANCE <= 64.0f);
 }
 
 /*
@@ -277,28 +277,28 @@ HM_TEST(codec_norm_tolerance_catches_a_one_byte_shift)
  * plausible waveform, and nothing in the protocol reports it — a sharp hand
  * shake reaches 83 % of full scale where a struck golf swing reaches 53-58 %.
  */
-HM_TEST(codec_counts_pinned_samples)
+WR_TEST(codec_counts_pinned_samples)
 {
     uint8_t buf[64];
-    hm_wire_block arm = hm_wire_identity_block(1000);
-    hm_wire_block palm = hm_wire_identity_block(1059);
-    hm_decoded d;
-    hm_pinned_counts counts;
+    wr_wire_block arm = wr_wire_identity_block(1000);
+    wr_wire_block palm = wr_wire_identity_block(1059);
+    wr_decoded d;
+    wr_pinned_counts counts;
     size_t n;
 
     arm.gyro[1] = 32767;   /* pinned positive */
     palm.accel[2] = -32767; /* pinned negative */
-    n = hm_wire_notification1(buf, 7, &arm, &palm);
+    n = wr_wire_notification1(buf, 7, &arm, &palm);
 
-    HM_ASSERT_EQ(hm_codec_decode(buf, n, hm_stream_config_default(), &d), HM_OK);
-    HM_ASSERT(d.u.frame.sample[0].flags & HM_SAMPLE_PINNED);
+    WR_ASSERT_EQ(wr_codec_decode(buf, n, wr_stream_config_default(), &d), WR_OK);
+    WR_ASSERT(d.u.frame.sample[0].flags & WR_SAMPLE_PINNED);
 
-    hm_pinned_counts_reset(&counts);
-    hm_pinned_counts_add(&counts, &d.u.frame.sample[0]);
-    HM_ASSERT_EQ(counts.n[HM_UNIT_LOWER_ARM][HM_CH_GYRO_Y], 1);
-    HM_ASSERT_EQ(counts.n[HM_UNIT_PALM][HM_CH_ACCEL_Z], 1);
-    HM_ASSERT_EQ(counts.n[HM_UNIT_LOWER_ARM][HM_CH_ACCEL_Z], 0);
-    HM_ASSERT_EQ(counts.total, 2);
+    wr_pinned_counts_reset(&counts);
+    wr_pinned_counts_add(&counts, &d.u.frame.sample[0]);
+    WR_ASSERT_EQ(counts.n[WR_UNIT_LOWER_ARM][WR_CH_GYRO_Y], 1);
+    WR_ASSERT_EQ(counts.n[WR_UNIT_PALM][WR_CH_ACCEL_Z], 1);
+    WR_ASSERT_EQ(counts.n[WR_UNIT_LOWER_ARM][WR_CH_ACCEL_Z], 0);
+    WR_ASSERT_EQ(counts.total, 2);
 }
 
 /*
@@ -306,51 +306,51 @@ HM_TEST(codec_counts_pinned_samples)
  * so it carries no device clock whatsoever and history retrieval is impossible
  * against it.  Samples decoded from it must say so.
  */
-HM_TEST(codec_legacy_frame_is_flagged_not_time_alignable)
+WR_TEST(codec_legacy_frame_is_flagged_not_time_alignable)
 {
-    hm_decoded d;
-    hm_status st = hm_codec_decode(HM_FIX_FRAME_LEGACY, sizeof(HM_FIX_FRAME_LEGACY),
-                                   hm_stream_config_legacy(), &d);
-    HM_ASSERT_EQ(st, HM_OK);
-    HM_ASSERT_EQ(d.kind, HM_MSGK_LEGACY_FRAME);
-    HM_ASSERT_EQ(d.consumed, 43);
-    HM_ASSERT(d.u.frame.sample[0].flags & HM_SAMPLE_NOT_TIME_ALIGNABLE);
-    HM_ASSERT(d.u.frame.sample[0].flags & HM_SAMPLE_INDEX_MISSING);
-    HM_ASSERT(d.u.frame.sample[0].flags & HM_SAMPLE_TICKS_MISSING);
-    HM_ASSERT(d.warnings & (1u << HM_WARN_LEGACY_STREAM));
+    wr_decoded d;
+    wr_status st = wr_codec_decode(WR_FIX_FRAME_LEGACY, sizeof(WR_FIX_FRAME_LEGACY),
+                                   wr_stream_config_legacy(), &d);
+    WR_ASSERT_EQ(st, WR_OK);
+    WR_ASSERT_EQ(d.kind, WR_MSGK_LEGACY_FRAME);
+    WR_ASSERT_EQ(d.consumed, 43);
+    WR_ASSERT(d.u.frame.sample[0].flags & WR_SAMPLE_NOT_TIME_ALIGNABLE);
+    WR_ASSERT(d.u.frame.sample[0].flags & WR_SAMPLE_INDEX_MISSING);
+    WR_ASSERT(d.u.frame.sample[0].flags & WR_SAMPLE_TICKS_MISSING);
+    WR_ASSERT(d.warnings & (1u << WR_WARN_LEGACY_STREAM));
 
     /* Blocks start at offset 0, so the quaternion is the first thing there. */
-    HM_ASSERT_EQ(d.u.frame.sample[0].lower_arm.q_world_to_body_raw[0], 16384);
+    WR_ASSERT_EQ(d.u.frame.sample[0].lower_arm.q_world_to_body_raw[0], 16384);
     /* Nominal divisor 16 for the legacy path: 800 → 50 °/s, not 100. */
-    HM_ASSERT_NEAR(d.u.frame.sample[0].lower_arm.gyro_dps[0], 50.0f, 1e-4);
+    WR_ASSERT_NEAR(d.u.frame.sample[0].lower_arm.gyro_dps[0], 50.0f, 1e-4);
 }
 
 /* §5.2 — versions.  Protocol version gates features, so it must be exact. */
-HM_TEST(codec_decodes_versions)
+WR_TEST(codec_decodes_versions)
 {
-    hm_decoded d;
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_VERSIONS, sizeof(HM_FIX_VERSIONS),
-                                 hm_stream_config_default(), &d),
-                 HM_OK);
-    HM_ASSERT_EQ(d.kind, HM_MSGK_VERSIONS);
-    HM_ASSERT_EQ(d.u.versions.hardware_major, 4);
-    HM_ASSERT_EQ(d.u.versions.hardware_minor, 1);
-    HM_ASSERT_EQ(d.u.versions.protocol_major, 4);
-    HM_ASSERT_EQ(d.u.versions.protocol_minor, 0);
-    HM_ASSERT_EQ(d.u.versions.firmware_major, 4);
-    HM_ASSERT_EQ(d.u.versions.firmware_minor, 8);
-    HM_ASSERT_EQ(d.u.versions.product_id, 0x14);
+    wr_decoded d;
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_VERSIONS, sizeof(WR_FIX_VERSIONS),
+                                 wr_stream_config_default(), &d),
+                 WR_OK);
+    WR_ASSERT_EQ(d.kind, WR_MSGK_VERSIONS);
+    WR_ASSERT_EQ(d.u.versions.hardware_major, 4);
+    WR_ASSERT_EQ(d.u.versions.hardware_minor, 1);
+    WR_ASSERT_EQ(d.u.versions.protocol_major, 4);
+    WR_ASSERT_EQ(d.u.versions.protocol_minor, 0);
+    WR_ASSERT_EQ(d.u.versions.firmware_major, 4);
+    WR_ASSERT_EQ(d.u.versions.firmware_minor, 8);
+    WR_ASSERT_EQ(d.u.versions.product_id, 0x14);
 }
 
 /* §5.3 — battery, then a u16be that is explicitly NOT millivolts. */
-HM_TEST(codec_decodes_status)
+WR_TEST(codec_decodes_status)
 {
-    hm_decoded d;
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_STATUS, sizeof(HM_FIX_STATUS),
-                                 hm_stream_config_default(), &d),
-                 HM_OK);
-    HM_ASSERT_EQ(d.u.status.percent, 100);
-    HM_ASSERT_EQ(d.u.status.undecoded, 2226);
+    wr_decoded d;
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_STATUS, sizeof(WR_FIX_STATUS),
+                                 wr_stream_config_default(), &d),
+                 WR_OK);
+    WR_ASSERT_EQ(d.u.status.percent, 100);
+    WR_ASSERT_EQ(d.u.status.undecoded, 2226);
 }
 
 /*
@@ -359,38 +359,38 @@ HM_TEST(codec_decodes_status)
  * device, which is precisely why the wrong reading looks right here: the test
  * pins the rule on a reply where the two answers DIFFER.
  */
-HM_TEST(codec_decodes_sensor_map)
+WR_TEST(codec_decodes_sensor_map)
 {
-    hm_decoded d;
+    wr_decoded d;
 
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_SENSOR_MAP, sizeof(HM_FIX_SENSOR_MAP),
-                                 hm_stream_config_default(), &d),
-                 HM_OK);
-    HM_ASSERT_EQ(d.kind, HM_MSGK_SENSOR_MAP);
-    HM_ASSERT_EQ(d.u.sensor_map.count, 2);
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_SENSOR_MAP, sizeof(WR_FIX_SENSOR_MAP),
+                                 wr_stream_config_default(), &d),
+                 WR_OK);
+    WR_ASSERT_EQ(d.kind, WR_MSGK_SENSOR_MAP);
+    WR_ASSERT_EQ(d.u.sensor_map.count, 2);
     /* `02 01`: 0.26 m then 0.10 m — the lower arm first, as the blocks are. */
-    HM_ASSERT_EQ(d.u.sensor_map.location[0], 0x02);
-    HM_ASSERT_EQ(d.u.sensor_map.location[1], 0x01);
-    HM_ASSERT_EQ(d.consumed, 3);
+    WR_ASSERT_EQ(d.u.sensor_map.location[0], 0x02);
+    WR_ASSERT_EQ(d.u.sensor_map.location[1], 0x01);
+    WR_ASSERT_EQ(d.consumed, 3);
 
     /* ⚠ THE CASE THAT SEPARATES THE TWO READINGS.  Two payload bytes whose
      * first is 1, not 2: still two sensors.  Reading byte 0 would say one. */
     {
         const uint8_t two_at_the_wrist[3] = {0x84, 0x01, 0x01};
-        HM_ASSERT_EQ(hm_codec_decode(two_at_the_wrist, sizeof(two_at_the_wrist),
-                                     hm_stream_config_default(), &d),
-                     HM_OK);
-        HM_ASSERT_EQ(d.u.sensor_map.count, 2);
+        WR_ASSERT_EQ(wr_codec_decode(two_at_the_wrist, sizeof(two_at_the_wrist),
+                                     wr_stream_config_default(), &d),
+                     WR_OK);
+        WR_ASSERT_EQ(d.u.sensor_map.count, 2);
     }
 
     /* One sensor, and one byte says so — the count follows the length up and
      * down, so a single-sensor map is not mistaken for this device's two. */
     {
         const uint8_t one[2] = {0x84, 0x02};
-        HM_ASSERT_EQ(hm_codec_decode(one, sizeof(one), hm_stream_config_default(), &d), HM_OK);
-        HM_ASSERT_EQ(d.u.sensor_map.count, 1);
-        HM_ASSERT_EQ(d.u.sensor_map.location[0], 0x02);
-        HM_ASSERT_EQ(d.consumed, 2);
+        WR_ASSERT_EQ(wr_codec_decode(one, sizeof(one), wr_stream_config_default(), &d), WR_OK);
+        WR_ASSERT_EQ(d.u.sensor_map.count, 1);
+        WR_ASSERT_EQ(d.u.sensor_map.location[0], 0x02);
+        WR_ASSERT_EQ(d.consumed, 2);
     }
 
     /* More sensors than this library keeps codes for: `count` tells the truth
@@ -398,83 +398,83 @@ HM_TEST(codec_decodes_sensor_map)
      * numbers rather than one. */
     {
         const uint8_t many[7] = {0x84, 0x02, 0x01, 0x00, 0x01, 0x02, 0x00};
-        HM_ASSERT_EQ(hm_codec_decode(many, sizeof(many), hm_stream_config_default(), &d), HM_OK);
-        HM_ASSERT_EQ(d.u.sensor_map.count, 6);
-        HM_ASSERT_EQ(d.u.sensor_map.location[HM_SENSOR_LOCATION_MAX - 1], 0x01);
-        HM_ASSERT_EQ(d.consumed, 7);
+        WR_ASSERT_EQ(wr_codec_decode(many, sizeof(many), wr_stream_config_default(), &d), WR_OK);
+        WR_ASSERT_EQ(d.u.sensor_map.count, 6);
+        WR_ASSERT_EQ(d.u.sensor_map.location[WR_SENSOR_LOCATION_MAX - 1], 0x01);
+        WR_ASSERT_EQ(d.consumed, 7);
     }
 
     /* No payload byte is no sensor, which no device can be. */
     {
         const uint8_t bare[1] = {0x84};
-        HM_ASSERT_EQ(hm_codec_decode(bare, sizeof(bare), hm_stream_config_default(), &d),
-                     HM_ERR_TRUNCATED);
+        WR_ASSERT_EQ(wr_codec_decode(bare, sizeof(bare), wr_stream_config_default(), &d),
+                     WR_ERR_TRUNCATED);
     }
 }
 
 /* §4 — the MAC arrives as 12 ASCII hex characters with no separators. */
-HM_TEST(codec_decodes_identifiers)
+WR_TEST(codec_decodes_identifiers)
 {
-    hm_decoded d;
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_MAC, sizeof(HM_FIX_MAC), hm_stream_config_default(),
+    wr_decoded d;
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_MAC, sizeof(WR_FIX_MAC), wr_stream_config_default(),
                                  &d),
-                 HM_OK);
-    HM_ASSERT_EQ(d.kind, HM_MSGK_MAC);
-    HM_ASSERT_STR(d.u.text.text, "01:23:45:67:89:AB");
+                 WR_OK);
+    WR_ASSERT_EQ(d.kind, WR_MSGK_MAC);
+    WR_ASSERT_STR(d.u.text.text, "01:23:45:67:89:AB");
 
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_SERIAL, sizeof(HM_FIX_SERIAL),
-                                 hm_stream_config_default(), &d),
-                 HM_OK);
-    HM_ASSERT_EQ(d.kind, HM_MSGK_SERIAL);
-    HM_ASSERT_STR(d.u.text.text, "WG3-00042");
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_SERIAL, sizeof(WR_FIX_SERIAL),
+                                 wr_stream_config_default(), &d),
+                 WR_OK);
+    WR_ASSERT_EQ(d.kind, WR_MSGK_SERIAL);
+    WR_ASSERT_STR(d.u.text.text, "WG3-00042");
 }
 
 /* §7.2 — the bracket.  02 = start (the acceptance test), 01 = end. */
-HM_TEST(codec_decodes_history_bracket)
+WR_TEST(codec_decodes_history_bracket)
 {
-    hm_decoded d;
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_HIST_START, 2, hm_stream_config_default(), &d),
-                 HM_OK);
-    HM_ASSERT_EQ(d.u.history.marker, 0x02);
-    HM_ASSERT(d.u.history.valid);
+    wr_decoded d;
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_HIST_START, 2, wr_stream_config_default(), &d),
+                 WR_OK);
+    WR_ASSERT_EQ(d.u.history.marker, 0x02);
+    WR_ASSERT(d.u.history.valid);
 
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_HIST_END, 2, hm_stream_config_default(), &d),
-                 HM_OK);
-    HM_ASSERT_EQ(d.u.history.marker, 0x01);
-    HM_ASSERT(d.u.history.valid);
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_HIST_END, 2, wr_stream_config_default(), &d),
+                 WR_OK);
+    WR_ASSERT_EQ(d.u.history.marker, 0x01);
+    WR_ASSERT(d.u.history.valid);
 
     {
         /* "unknown magic cookie" — any other value is rejected. */
         const uint8_t bogus[2] = {0xA1, 0x07};
-        HM_ASSERT_EQ(hm_codec_decode(bogus, 2, hm_stream_config_default(), &d), HM_OK);
-        HM_ASSERT(!d.u.history.valid);
+        WR_ASSERT_EQ(wr_codec_decode(bogus, 2, wr_stream_config_default(), &d), WR_OK);
+        WR_ASSERT(!d.u.history.valid);
     }
 }
 
 /* §7.2 — d0 03 is the only error the history command produces, across seven
  * distinct causes.  The codec must not pretend to know which. */
-HM_TEST(codec_decodes_device_error)
+WR_TEST(codec_decodes_device_error)
 {
-    hm_decoded d;
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_DEVICE_ERROR, 2, hm_stream_config_default(), &d),
-                 HM_OK);
-    HM_ASSERT_EQ(d.kind, HM_MSGK_DEVICE_ERROR);
-    HM_ASSERT_EQ(d.u.device_error.code, 0x03);
+    wr_decoded d;
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_DEVICE_ERROR, 2, wr_stream_config_default(), &d),
+                 WR_OK);
+    WR_ASSERT_EQ(d.kind, WR_MSGK_DEVICE_ERROR);
+    WR_ASSERT_EQ(d.u.device_error.code, 0x03);
 }
 
 /* §8.2 — the 64-byte payload is carried verbatim and deliberately undecoded. */
-HM_TEST(codec_decodes_calibration_result)
+WR_TEST(codec_decodes_calibration_result)
 {
-    hm_decoded d;
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_CALIBRATION, sizeof(HM_FIX_CALIBRATION),
-                                 hm_stream_config_default(), &d),
-                 HM_OK);
-    HM_ASSERT_EQ(d.kind, HM_MSGK_CALIBRATION_RESULT);
-    HM_ASSERT_EQ(d.consumed, 65);
-    HM_ASSERT(!d.u.calibration.is_status);
-    HM_ASSERT_EQ(d.u.calibration.payload[0], 0x01);
-    HM_ASSERT_EQ(d.u.calibration.payload[63], 0x40);
-    HM_ASSERT_EQ(d.warnings, 0u);
+    wr_decoded d;
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_CALIBRATION, sizeof(WR_FIX_CALIBRATION),
+                                 wr_stream_config_default(), &d),
+                 WR_OK);
+    WR_ASSERT_EQ(d.kind, WR_MSGK_CALIBRATION_RESULT);
+    WR_ASSERT_EQ(d.consumed, 65);
+    WR_ASSERT(!d.u.calibration.is_status);
+    WR_ASSERT_EQ(d.u.calibration.payload[0], 0x01);
+    WR_ASSERT_EQ(d.u.calibration.payload[63], 0x40);
+    WR_ASSERT_EQ(d.warnings, 0u);
 
     /* Past the long form's 65 bytes there is nothing to interpret: the eight
      * quaternions are still decoded and the remainder is reported rather than
@@ -482,12 +482,12 @@ HM_TEST(codec_decodes_calibration_result)
     {
         uint8_t over[70];
         memset(over, 0xEE, sizeof(over));
-        memcpy(over, HM_FIX_CALIBRATION, sizeof(HM_FIX_CALIBRATION));
-        HM_ASSERT_EQ(hm_codec_decode(over, sizeof(over), hm_stream_config_default(), &d), HM_OK);
-        HM_ASSERT_EQ(d.kind, HM_MSGK_CALIBRATION_RESULT);
-        HM_ASSERT_EQ(d.consumed, 65);
-        HM_ASSERT_EQ(d.u.calibration.payload[63], 0x40);
-        HM_ASSERT(d.warnings & (1u << HM_WARN_TRAILING_BYTES));
+        memcpy(over, WR_FIX_CALIBRATION, sizeof(WR_FIX_CALIBRATION));
+        WR_ASSERT_EQ(wr_codec_decode(over, sizeof(over), wr_stream_config_default(), &d), WR_OK);
+        WR_ASSERT_EQ(d.kind, WR_MSGK_CALIBRATION_RESULT);
+        WR_ASSERT_EQ(d.consumed, 65);
+        WR_ASSERT_EQ(d.u.calibration.payload[63], 0x40);
+        WR_ASSERT(d.warnings & (1u << WR_WARN_TRAILING_BYTES));
     }
 }
 
@@ -496,20 +496,20 @@ HM_TEST(codec_decodes_calibration_result)
  * A short one is not a truncated long one, and decoding it as such would drop
  * the only form that carries a status byte at all.
  */
-HM_TEST(codec_decodes_the_short_form_of_the_calibration_result)
+WR_TEST(codec_decodes_the_short_form_of_the_calibration_result)
 {
-    hm_decoded d;
+    wr_decoded d;
 
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_CALIBRATION_STATUS, sizeof(HM_FIX_CALIBRATION_STATUS),
-                                 hm_stream_config_default(), &d),
-                 HM_OK);
-    HM_ASSERT_EQ(d.kind, HM_MSGK_CALIBRATION_RESULT);
-    HM_ASSERT(d.u.calibration.is_status);
-    HM_ASSERT_EQ(d.u.calibration.status, 0x01);
-    HM_ASSERT_EQ(d.consumed, 2);
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_CALIBRATION_STATUS, sizeof(WR_FIX_CALIBRATION_STATUS),
+                                 wr_stream_config_default(), &d),
+                 WR_OK);
+    WR_ASSERT_EQ(d.kind, WR_MSGK_CALIBRATION_RESULT);
+    WR_ASSERT(d.u.calibration.is_status);
+    WR_ASSERT_EQ(d.u.calibration.status, 0x01);
+    WR_ASSERT_EQ(d.consumed, 2);
     /* The quaternion buffer is not left holding something that looks decoded. */
-    HM_ASSERT_EQ(d.u.calibration.payload[0], 0x00);
-    HM_ASSERT_EQ(d.warnings, 0u);
+    WR_ASSERT_EQ(d.u.calibration.payload[0], 0x00);
+    WR_ASSERT_EQ(d.warnings, 0u);
 
     /* The whole short range decodes, up to the device's own 63-byte ceiling —
      * and `consumed` claims only the byte that was read, never the rest. */
@@ -519,18 +519,18 @@ HM_TEST(codec_decodes_the_short_form_of_the_calibration_result)
         msg[0] = 0x94;
         msg[1] = 0x7F;
         for (size_t n = 2; n <= sizeof(msg); ++n) {
-            HM_ASSERT_EQ(hm_codec_decode(msg, n, hm_stream_config_default(), &d), HM_OK);
-            HM_ASSERT(d.u.calibration.is_status);
-            HM_ASSERT_EQ(d.u.calibration.status, 0x7F);
-            HM_ASSERT_EQ(d.consumed, 2);
+            WR_ASSERT_EQ(wr_codec_decode(msg, n, wr_stream_config_default(), &d), WR_OK);
+            WR_ASSERT(d.u.calibration.is_status);
+            WR_ASSERT_EQ(d.u.calibration.status, 0x7F);
+            WR_ASSERT_EQ(d.consumed, 2);
         }
     }
 
     /* The id on its own has no status byte in it. */
     {
         const uint8_t bare[1] = {0x94};
-        HM_ASSERT_EQ(hm_codec_decode(bare, sizeof(bare), hm_stream_config_default(), &d),
-                     HM_ERR_TRUNCATED);
+        WR_ASSERT_EQ(wr_codec_decode(bare, sizeof(bare), wr_stream_config_default(), &d),
+                     WR_ERR_TRUNCATED);
     }
 
     /*
@@ -542,65 +542,65 @@ HM_TEST(codec_decodes_the_short_form_of_the_calibration_result)
         uint8_t msg[64];
         memset(msg, 0, sizeof(msg));
         msg[0] = 0x94;
-        HM_ASSERT_EQ(hm_codec_decode(msg, sizeof(msg), hm_stream_config_default(), &d),
-                     HM_ERR_TRUNCATED);
+        WR_ASSERT_EQ(wr_codec_decode(msg, sizeof(msg), wr_stream_config_default(), &d),
+                     WR_ERR_TRUNCATED);
     }
 }
 
 /* §5.1 — anything not in the table is logged and ignored, NOT an error. */
-HM_TEST(codec_reports_unknown_ids_without_treating_them_as_failures)
+WR_TEST(codec_reports_unknown_ids_without_treating_them_as_failures)
 {
     const uint8_t unknown[4] = {0x77, 0x01, 0x02, 0x03};
-    hm_decoded d;
-    HM_ASSERT_EQ(hm_codec_decode(unknown, sizeof(unknown), hm_stream_config_default(), &d),
-                 HM_ERR_UNKNOWN_MESSAGE);
-    HM_ASSERT_EQ(d.kind, HM_MSGK_UNKNOWN);
-    HM_ASSERT_EQ(d.message_id, 0x77);
+    wr_decoded d;
+    WR_ASSERT_EQ(wr_codec_decode(unknown, sizeof(unknown), wr_stream_config_default(), &d),
+                 WR_ERR_UNKNOWN_MESSAGE);
+    WR_ASSERT_EQ(d.kind, WR_MSGK_UNKNOWN);
+    WR_ASSERT_EQ(d.message_id, 0x77);
     /* An unknown id has no implied length, so nothing after it can be located. */
-    HM_ASSERT_EQ(d.consumed, 4);
+    WR_ASSERT_EQ(d.consumed, 4);
 }
 
-HM_TEST(codec_reports_truncation_rather_than_reading_past_the_buffer)
+WR_TEST(codec_reports_truncation_rather_than_reading_past_the_buffer)
 {
-    hm_decoded d;
-    for (size_t n = 1; n < sizeof(HM_FIX_FRAME_7E); ++n) {
-        HM_ASSERT_EQ(hm_codec_decode(HM_FIX_FRAME_7E, n, hm_stream_config_default(), &d),
-                     HM_ERR_TRUNCATED);
+    wr_decoded d;
+    for (size_t n = 1; n < sizeof(WR_FIX_FRAME_7E); ++n) {
+        WR_ASSERT_EQ(wr_codec_decode(WR_FIX_FRAME_7E, n, wr_stream_config_default(), &d),
+                     WR_ERR_TRUNCATED);
     }
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_VERSIONS, 4, hm_stream_config_default(), &d),
-                 HM_ERR_TRUNCATED);
-    HM_ASSERT_EQ(hm_codec_decode(HM_FIX_FRAME_7E, 0, hm_stream_config_default(), &d),
-                 HM_ERR_TRUNCATED);
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_VERSIONS, 4, wr_stream_config_default(), &d),
+                 WR_ERR_TRUNCATED);
+    WR_ASSERT_EQ(wr_codec_decode(WR_FIX_FRAME_7E, 0, wr_stream_config_default(), &d),
+                 WR_ERR_TRUNCATED);
 }
 
 /* Every prefix of every fixture must be handled without a crash or a read past
  * the end.  Run under ASan this is a cheap standing fuzz of the decoder. */
-HM_TEST(codec_survives_every_prefix_of_every_fixture)
+WR_TEST(codec_survives_every_prefix_of_every_fixture)
 {
-    const uint8_t *fixtures[] = {HM_FIX_FRAME_7E,  HM_FIX_FRAME_LEGACY, HM_FIX_VERSIONS,
-                                 HM_FIX_STATUS,    HM_FIX_SENSOR_MAP,   HM_FIX_MAC,
-                                 HM_FIX_SERIAL,    HM_FIX_CALIBRATION,  HM_FIX_START_ACK,
-                                 HM_FIX_STOP_ACK,  HM_FIX_BUTTON,       HM_FIX_DEVICE_ERROR};
-    const size_t sizes[] = {sizeof(HM_FIX_FRAME_7E),  sizeof(HM_FIX_FRAME_LEGACY),
-                            sizeof(HM_FIX_VERSIONS),  sizeof(HM_FIX_STATUS),
-                            sizeof(HM_FIX_SENSOR_MAP), sizeof(HM_FIX_MAC),
-                            sizeof(HM_FIX_SERIAL),    sizeof(HM_FIX_CALIBRATION),
-                            sizeof(HM_FIX_START_ACK), sizeof(HM_FIX_STOP_ACK),
-                            sizeof(HM_FIX_BUTTON),    sizeof(HM_FIX_DEVICE_ERROR)};
-    hm_decoded d;
+    const uint8_t *fixtures[] = {WR_FIX_FRAME_7E,  WR_FIX_FRAME_LEGACY, WR_FIX_VERSIONS,
+                                 WR_FIX_STATUS,    WR_FIX_SENSOR_MAP,   WR_FIX_MAC,
+                                 WR_FIX_SERIAL,    WR_FIX_CALIBRATION,  WR_FIX_START_ACK,
+                                 WR_FIX_STOP_ACK,  WR_FIX_BUTTON,       WR_FIX_DEVICE_ERROR};
+    const size_t sizes[] = {sizeof(WR_FIX_FRAME_7E),  sizeof(WR_FIX_FRAME_LEGACY),
+                            sizeof(WR_FIX_VERSIONS),  sizeof(WR_FIX_STATUS),
+                            sizeof(WR_FIX_SENSOR_MAP), sizeof(WR_FIX_MAC),
+                            sizeof(WR_FIX_SERIAL),    sizeof(WR_FIX_CALIBRATION),
+                            sizeof(WR_FIX_START_ACK), sizeof(WR_FIX_STOP_ACK),
+                            sizeof(WR_FIX_BUTTON),    sizeof(WR_FIX_DEVICE_ERROR)};
+    wr_decoded d;
     int handled = 0;
 
     for (size_t f = 0; f < sizeof(sizes) / sizeof(sizes[0]); ++f) {
         for (size_t n = 0; n <= sizes[f]; ++n) {
-            hm_status st = hm_codec_decode(fixtures[f], n, hm_stream_config_default(), &d);
-            HM_ASSERT(st == HM_OK || st == HM_ERR_TRUNCATED || st == HM_ERR_UNKNOWN_MESSAGE);
-            if (st == HM_OK) {
-                HM_ASSERT(d.consumed <= n);
+            wr_status st = wr_codec_decode(fixtures[f], n, wr_stream_config_default(), &d);
+            WR_ASSERT(st == WR_OK || st == WR_ERR_TRUNCATED || st == WR_ERR_UNKNOWN_MESSAGE);
+            if (st == WR_OK) {
+                WR_ASSERT(d.consumed <= n);
             }
             handled++;
         }
     }
-    HM_ASSERT(handled > 200);
+    WR_ASSERT(handled > 200);
 }
 
-HM_TEST_MAIN()
+WR_TEST_MAIN()

@@ -4,11 +4,11 @@
 """test_python_transport.py — the bleak transport, driven by a real device's bytes.
 
 ⚠ AN UNTESTED TRANSPORT THAT LOOKS FINISHED IS WORSE THAN AN HONESTLY PARTIAL
-ONE.  This file is what keeps `hackmotion/bleak_transport.py` from being the
+ONE.  This file is what keeps `wrist/bleak_transport.py` from being the
 second kind.  It replaces the radio and nothing else: the transport's own
 notification callback, its own pump, its own drains, its own write path and its
 own classification all run exactly as they do against a sensor, over the bytes
-`swings.hmwire` recorded off one.
+`swings.wrwire` recorded off one.
 
 ⚠ WHAT IT CANNOT SEE, said plainly.  The loopback cannot test bleak itself — the
 BlueZ MTU trap, whether a backend really preserves ATT PDU boundaries, whether
@@ -28,7 +28,7 @@ where a transport goes wrong:
     tool and the binding both produce
   · a link drop is CLASSIFIED, and each arm of the classification is reachable
 
-Usage: test_python_transport.py <libhackmotion_ffi.so> [<fixture.hmwire>]
+Usage: test_python_transport.py <libwrist_ffi.so> [<fixture.wrwire>]
 """
 
 import asyncio
@@ -43,15 +43,15 @@ failures = 0
 checks = 0
 
 # ⚠ THE TWO REGIMES, AND A CHECK THAT ONLY EVER SEES ONE HAS SEEN HALF THE
-# DEVICE.  `swings.hmwire` is the 657-728 Hz regime — five pulls over golf
-# swings and one over a wrist held still.  `session1.hmwire` is the 100.5 Hz
+# DEVICE.  `swings.wrwire` is the 657-728 Hz regime — five pulls over golf
+# swings and one over a wrist held still.  `session1.wrwire` is the 100.5 Hz
 # one, a calibration choreography whose single pull is over a still wrist, and
 # it sits at 173 s, PAST TWO INDEX WRAPS.
 #
 #     fixture            blocks, densest, sparsest
 DENSITY_SIGNATURE = {
-    "swings.hmwire": (6, 1.0, 0.125),
-    "session1.hmwire": (1, 0.125, 0.125),
+    "swings.wrwire": (6, 1.0, 0.125),
+    "session1.wrwire": (1, 0.125, 0.125),
 }
 
 
@@ -175,24 +175,24 @@ class SpySession:
 # The run
 # ---------------------------------------------------------------------------
 async def replay_through_transport(fixture: Path):
-    import hackmotion as hm
-    from hackmotion import _types as T
-    from hackmotion.bleak_transport import BleakTransport
+    import wrist as wr
+    from wrist import _types as T
+    from wrist.bleak_transport import BleakTransport
 
     clock = Clock()
     client = LoopbackClient(mtu=247)
     # ⚠ THE STREAM-START BOUND IS RELAXED, AND ONLY BECAUSE THIS IS A REPLAY.
     # The library's 3 s default is two orders of margin over the 50-80 ms a real
-    # device takes.  `session1.hmwire`'s first frame arrived at 4.08 s — a
+    # device takes.  `session1.wrwire`'s first frame arrived at 4.08 s — a
     # property of the RECORDER, whose harness blocked its own event loop, not of
     # the device.  Enforcing a live-session bound against a recording would
     # discard the only capture this project holds of a retrieval past two index
     # wraps, and would be enforcing it against the wrong party.  The bound is
     # tested where it belongs, in `tests/test_session.c`.
-    # `tools/hm_replay_py.py` carries the same relaxation for the same reason.
-    session = hm.Session(
+    # `tools/wr_replay_py.py` carries the same relaxation for the same reason.
+    session = wr.Session(
         "loopback",
-        digest_ring=hm.HM_DIGEST_RING_RECOMMENDED,
+        digest_ring=wr.WR_DIGEST_RING_RECOMMENDED,
         policy={"stream_start_timeout_us": 15_000_000},
     )
     spy = SpySession(session)
@@ -231,7 +231,7 @@ async def replay_through_transport(fixture: Path):
             pending[0] = 0
             blocks.append(
                 {
-                    "status": hm.history_status_name(block.status),
+                    "status": wr.history_status_name(block.status),
                     "n": block.sample_count,
                     "density": block.density,
                     "coverage": block.coverage_fraction,
@@ -242,7 +242,7 @@ async def replay_through_transport(fixture: Path):
             )
 
     def reserve_like_the_recording(chunk):
-        """The same reservation `tools/hm_replay_py.py` makes, for the same
+        """The same reservation `tools/wr_replay_py.py` makes, for the same
         reason: the recording's own `a1` says where a retrieval happened, and a
         library-driven consumer asks for that span in HOST time."""
         collect()
@@ -262,18 +262,18 @@ async def replay_through_transport(fixture: Path):
         if first >= last:
             return
 
-        request = T.hm_history_request()
-        request.window.start_us = hm.clock_to_host_us(snapshot, first) - 1
-        request.window.end_us = hm.clock_to_host_us(snapshot, last) + 1
+        request = T.wr_history_request()
+        request.window.start_us = wr.clock_to_host_us(snapshot, first) - 1
+        request.window.end_us = wr.clock_to_host_us(snapshot, last) + 1
         request.deadline_us = chunk.host_time_us + 60_000_000
         request.max_attempts = 1
         try:
             pending[0] = session.history_reserve(request)
-        except hm.HackMotionError:
+        except wr.WristError:
             pending[0] = 0
 
     # --- drive it ---------------------------------------------------------
-    with hm.Replay(fixture) as replay:
+    with wr.Replay(fixture) as replay:
         chunks = list(replay)
 
     if not chunks:
@@ -290,7 +290,7 @@ async def replay_through_transport(fixture: Path):
             if text.startswith(b"stream_start"):
                 try:
                     session.start_stream()
-                except hm.HackMotionError as exc:
+                except wr.WristError as exc:
                     # ⚠ Recorded rather than raised, so a broken transport fails
                     # the CHECKS below by name instead of killing the harness
                     # with a traceback that says nothing about which property
@@ -332,9 +332,9 @@ async def replay_through_transport(fixture: Path):
 # The classification, on its own — a pure function with reachable arms
 # ---------------------------------------------------------------------------
 def check_classification():
-    import hackmotion as hm  # noqa: F401
-    from hackmotion import _types as T
-    from hackmotion.bleak_transport import (
+    import wrist as wr  # noqa: F401
+    from wrist import _types as T
+    from wrist.bleak_transport import (
         LINK_QUIET_AMBIGUOUS_US,
         BleakTransport,
         LinkClassification,
@@ -411,7 +411,7 @@ async def check_mtu_translation():
     """⚠ 23 IS NOT A MEASUREMENT.  BlueZ reports the ATT default until something
     asks it properly, and reading that as a negotiated value refuses a perfectly
     good link — an ABSENT answer dressed up as a bad one."""
-    from hackmotion.bleak_transport import negotiated_mtu
+    from wrist.bleak_transport import negotiated_mtu
 
     class Raising:
         @property
@@ -431,8 +431,8 @@ async def check_allowlist_refusal():
     making it fire.  `f0` reboots the sensor into firmware-update mode through
     the ORDINARY data characteristic, and a transport that grew a second write
     path is exactly how it would reach the wire."""
-    import hackmotion as hm
-    from hackmotion.bleak_transport import BleakTransport, TransportError
+    import wrist as wr
+    from wrist.bleak_transport import BleakTransport, TransportError
 
     client = LoopbackClient()
     transport = BleakTransport.__new__(BleakTransport)
@@ -443,25 +443,25 @@ async def check_allowlist_refusal():
     transport.writes = 0
     transport.bytes_out = 0
 
-    check(not hm.command_is_allowed(0xF0),
+    check(not wr.command_is_allowed(0xF0),
           "⛔ 0xf0 is not on the library's allowlist")
     try:
-        await transport._write(hm.WriteRequest(data=b"\xf0", without_response=False))
+        await transport._write(wr.WriteRequest(data=b"\xf0", without_response=False))
         check(False, "⛔ a write of f0 was NOT refused — it reached the client")
     except TransportError:
         check(len(client.written) == 0,
               "⛔ a write of f0 is refused and nothing reaches the characteristic")
 
     # And the allowed case still goes through, or the check above proves nothing.
-    await transport._write(hm.WriteRequest(data=b"\x81", without_response=False))
+    await transport._write(wr.WriteRequest(data=b"\x81", without_response=False))
     check(client.written == [b"\x81"], "an allowlisted command is written unchanged")
 
 
 # ---------------------------------------------------------------------------
 def check_fixture(fixture: Path) -> int:
     """Every transport check that needs real bytes, over one recording."""
-    import hackmotion as hm
-    from hackmotion import _types as T
+    import wrist as wr
+    from wrist import _types as T
 
     print(f"\n--- {fixture.name} ---")
     result = asyncio.run(replay_through_transport(fixture))
@@ -521,7 +521,7 @@ def check_fixture(fixture: Path) -> int:
               f"...carrying its recovery advice — {down[0].text}")
 
     # --- ⛔ the bytes that left -------------------------------------------
-    allowed = set(hm.command_allowlist())
+    allowed = set(wr.command_allowlist())
     check(len(client.written) > 0,
           f"the transport wrote {len(client.written)} command(s)")
     check(
@@ -641,12 +641,12 @@ def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
         return 2
-    os.environ["HACKMOTION_LIBRARY"] = sys.argv[1]
+    os.environ["WRIST_LIBRARY"] = sys.argv[1]
 
     fixtures = [Path(a) for a in sys.argv[2:]]
     if not fixtures:
         here = Path(__file__).resolve().parent / "fixtures"
-        fixtures = [here / "swings.hmwire", here / "session1.hmwire"]
+        fixtures = [here / "swings.wrwire", here / "session1.wrwire"]
 
     missing = [f for f in fixtures if not f.is_file()]
     if missing:

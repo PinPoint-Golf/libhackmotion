@@ -22,8 +22,8 @@ compile_commands.json
 # them (api-request §2.13), so an ad-hoc capture taken at the repo root must
 # never be committed by accident.  The fixtures below are tracked one by one,
 # after checking each is redacted — see tests/fixtures/README.md.
-*.hmwire
-!tests/fixtures/*.hmwire
+*.wrwire
+!tests/fixtures/*.wrwire
 __pycache__/
 
 # Claude-specific artefacts stay local, as in PinPoint Studio's tree: notes and

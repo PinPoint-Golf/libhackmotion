@@ -5,14 +5,14 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hackmotion"
-version = "0.1.0"
-description = "Python bindings for libhackmotion, the sans-I/O HackMotion wG3 library"
+name = "wrist"
+version = "0.2.0"
+description = "Python bindings for libwrist, the sans-I/O C library for HackMotion wG3 wrist sensors"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "libhackmotion contributors" }]
-keywords = ["hackmotion", "ble", "imu", "golf", "sensor"]
+authors = [{ name = "libwrist contributors" }]
+keywords = ["wrist", "ble", "imu", "golf", "sensor"]
 
 # ⚠ NO REQUIRED DEPENDENCIES, AND THAT IS DELIBERATE.  The binding is ctypes over
 # a shared object; anything else it needed would be something a consumer has to
@@ -20,7 +20,7 @@ keywords = ["hackmotion", "ble", "imu", "golf", "sensor"]
 dependencies = []
 
 [project.optional-dependencies]
-# The radio.  Only tools/hm_bench.py and hackmotion.bleak_transport need it, and
+# The radio.  Only tools/wr_bench.py and wrist.bleak_transport need it, and
 # the core binding imports and works without it.
 bleak = ["bleak>=0.21"]
 # A zero-copy structured view over a sample array.  Samples.numpy() is the only
@@ -28,10 +28,10 @@ bleak = ["bleak>=0.21"]
 numpy = ["numpy>=1.21"]
 
 [tool.setuptools.packages.find]
-include = ["hackmotion*"]
+include = ["wrist*"]
 
 # ⚠ THE SHARED OBJECT IS NOT PACKAGED YET, and the binding says so loudly rather
-# than half-working: it looks for `libhackmotion_ffi` via HACKMOTION_LIBRARY,
+# than half-working: it looks for `libwrist_ffi` via WRIST_LIBRARY,
 # then the repo's build directories, then beside the package, then the platform
 # loader — and raises LibraryNotFound with the cmake lines if none of those has
 # it.  Bundling a built object per platform is its own piece of work and belongs

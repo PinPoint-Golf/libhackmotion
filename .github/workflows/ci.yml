@@ -17,7 +17,7 @@ jobs:
           - { name: "linux-gcc",   os: ubuntu-latest,  cc: gcc,   extra: "" }
           - { name: "linux-clang", os: ubuntu-latest,  cc: clang, extra: "" }
           # ⚠ gcc here, deliberately, and not clang.  The binding tests dlopen
-          # an instrumented libhackmotion_ffi.so from a stock CPython, and
+          # an instrumented libwrist_ffi.so from a stock CPython, and
           # clang's ASan cannot place its shadow in an already-mapped non-PIE
           # interpreter — "Shadow memory range interleaves with an existing
           # memory mapping".  That is a limit of the environment, not anything

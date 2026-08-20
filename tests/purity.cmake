@@ -10,7 +10,7 @@
 # Every symbol below would mean the library had started doing something the host
 # is supposed to do.
 #
-# ⚠⚠ THIS RUNS ON `hackmotion` AND MUST NEVER BE POINTED AT `hackmotion_ffi`.
+# ⚠⚠ THIS RUNS ON `wrist` AND MUST NEVER BE POINTED AT `wrist_ffi`.
 # That second target is one shared object holding the core AND the record
 # module, so a language binding can dlopen a single file (CMakeLists.txt); it
 # opens files by construction and would fail every check below.  That is not a
@@ -56,7 +56,7 @@ endforeach()
 
 if(violations)
     message(FATAL_ERROR
-        "libhackmotion must stay sans-I/O (api-request §2.0) but references: ${violations}")
+        "libwrist must stay sans-I/O (api-request §2.0) but references: ${violations}")
 endif()
 
 message(STATUS "purity: core references no clock, thread, socket or file API")
